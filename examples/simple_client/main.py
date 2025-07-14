@@ -184,4 +184,12 @@ def _random_observation_libero() -> dict:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    
+    import sys
+    sys.argv = [
+        sys.argv[0],            # 脚本名
+        "--env",       # 第一个位置参数
+        "DROID",
+    ] 
+    
     main(tyro.cli(Args))

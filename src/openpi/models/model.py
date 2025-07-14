@@ -213,6 +213,10 @@ class BaseModelConfig(abc.ABC):
     action_horizon: int
     # Tokenized prompt maximum length.
     max_token_len: int
+    # End position dimension.
+    end_pos_dim: int
+    # Output format.
+    output_format: str = "end_pos"
 
     @property
     @abc.abstractmethod
@@ -268,6 +272,13 @@ class BaseModel(nnx.Module, abc.ABC):
 
     @abc.abstractmethod
     def sample_actions(self, rng: at.KeyArrayLike, observation: Observation) -> Actions: ...
+
+    # @abc.abstractmethod
+    # def get_mse_loss(self) -> tuple[at.Float[at.Array, "*b ah"], at.Float[at.Array, "*b ah"]]: ...
+
+    @abc.abstractmethod
+    def action2endpos(self, actions: Actions) -> at.Float[at.Array, "*b ah ed"]: ...
+
 
 
 def restore_params(

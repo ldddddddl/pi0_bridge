@@ -16,7 +16,9 @@ from openpi.training.droid_rlds_dataset import DroidRldsDataset
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
-
+import os
+# os.environ["http_proxy"] = "http://localhost:10808"
+# os.environ["https_proxy"] = "http://localhost:10808"
 
 class Dataset(Protocol[T_co]):
     """Interface for a dataset with random access."""
@@ -136,14 +138,13 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=data_config.root)
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
     )
-
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
 
@@ -173,9 +174,9 @@ def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip
     if data_config.repo_id != "fake" and not skip_norm_stats:
         if data_config.norm_stats is None:
             raise ValueError(
-                "Normalization stats not found. "
-                "Make sure to run `scripts/compute_norm_stats.py --config-name=<your-config>`."
-            )
+                    "Normalization stats not found. "
+                    "Make sure to run `scripts/compute_norm_stats.py --config-name=<your-config>`."
+                )
         norm_stats = data_config.norm_stats
 
     return TransformedDataset(
@@ -284,6 +285,9 @@ def create_torch_data_loader(
         seed: The seed to use for shuffling the data.
     """
     dataset = create_torch_dataset(data_config, action_horizon, model_config)
+    # data_loader_bridge = create_bridge_dataloader()
+    
+    
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
 
     data_loader = TorchDataLoader(

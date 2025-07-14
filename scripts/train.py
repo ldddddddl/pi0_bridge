@@ -15,6 +15,7 @@ import numpy as np
 import optax
 import tqdm_loggable.auto as tqdm
 import wandb
+import math
 
 import openpi.models.model as _model
 import openpi.shared.array_typing as at
@@ -27,6 +28,15 @@ import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
 
+# 顶层定义Subset类，便于PyTorch DataLoader多进程pickle
+class Subset:
+    def __init__(self, dataset, indices):
+        self.dataset = dataset
+        self.indices = indices
+    def __getitem__(self, idx):
+        return self.dataset[int(self.indices[idx])]
+    def __len__(self):
+        return len(self.indices)
 
 def init_logging():
     """Custom logging format for better readability."""
@@ -49,7 +59,10 @@ def init_logging():
 
 def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = False, enabled: bool = True):
     if not enabled:
-        wandb.init(mode="disabled")
+        import datetime
+        ct = datetime.datetime.now()
+        strf_time = ct.strftime("%Y-%m-%d-%H-%M-%S")
+        wandb.init(mode="disabled", name=f'{strf_time}')
         return
 
     ckpt_dir = config.checkpoint_dir
@@ -70,14 +83,30 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
         wandb.run.log_code(epath.Path(__file__).parent.parent)
 
 
-def _load_weights_and_validate(loader: _weight_loaders.WeightLoader, params_shape: at.Params) -> at.Params:
-    """Loads and validates the weights. Returns a loaded subset of the weights."""
-    loaded_params = loader.load(params_shape)
-    at.check_pytree_equality(expected=params_shape, got=loaded_params, check_shapes=True, check_dtypes=True)
+def partial_load(model_params, loaded_params):
+    """
+    递归地只加载权重文件中有的参数，缺失的参数保持模型初始化的值。
+    """
+    if isinstance(model_params, dict) and isinstance(loaded_params, dict):
+        out = {}
+        for k in model_params:
+            if k in loaded_params:
+                out[k] = partial_load(model_params[k], loaded_params[k])
+            else:
+                out[k] = model_params[k]
+        return out
+    else:
+        return loaded_params if loaded_params is not None else model_params
 
+
+def _load_weights_and_validate(loader: _weight_loaders.WeightLoader, params_shape: at.Params) -> at.Params:
+    """Loads and partially merges the weights. Returns a loaded subset of the weights."""
+    loaded_params = loader.load(params_shape)
+    # 不再严格检查结构，只做部分加载
+    merged_params = partial_load(params_shape, loaded_params)
     # Remove jax.ShapeDtypeStruct from the loaded params. This makes sure that only the loaded params are returned.
     return traverse_util.unflatten_dict(
-        {k: v for k, v in traverse_util.flatten_dict(loaded_params).items() if not isinstance(v, jax.ShapeDtypeStruct)}
+        {k: v for k, v in traverse_util.flatten_dict(merged_params).items() if not isinstance(v, jax.ShapeDtypeStruct)}
     )
 
 
@@ -147,16 +176,19 @@ def train_step(
     def loss_fn(
         model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
     ):
-        chunked_loss = model.compute_loss(rng, observation, actions, train=True)
-        return jnp.mean(chunked_loss)
+        chunked_loss, mse_loss_in, mse_loss_out = model.compute_loss(rng, observation, actions, train=True)
+        total_loss = jnp.mean(chunked_loss) + mse_loss_in + mse_loss_out
+        # 用 stop_gradient + float() 保证副产物为Python标量，避免nnx.value_and_grad报错
+        return total_loss, (mse_loss_in, mse_loss_out)
 
     train_rng = jax.random.fold_in(rng, state.step)
     observation, actions = batch
 
     # Filter out frozen params.
     diff_state = nnx.DiffState(0, config.trainable_filter)
-    loss, grads = nnx.value_and_grad(loss_fn, argnums=diff_state)(model, train_rng, observation, actions)
-
+    (loss, (mse_loss_in, mse_loss_out)), grads = nnx.value_and_grad(loss_fn, argnums=diff_state, has_aux=True)(model, train_rng, observation, actions)
+    # mse_loss_in, mse_loss_out = model.get_mse_loss()
+    
     params = state.params.filter(config.trainable_filter)
     updates, new_opt_state = state.tx.update(grads, state.opt_state, params)
     new_params = optax.apply_updates(params, updates)
@@ -184,11 +216,43 @@ def train_step(
         ),
     )
     info = {
-        "loss": loss,
+        "train_total_loss": loss,
+        "train_mse_loss_in": mse_loss_in,
+        "train_mse_loss_out": mse_loss_out,
         "grad_norm": optax.global_norm(grads),
         "param_norm": optax.global_norm(kernel_params),
     }
     return new_state, info
+
+
+def valid_step(
+    config: _config.TrainConfig,
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> dict[str, at.Array]:
+    model = nnx.merge(state.model_def, state.params)
+    model.eval()
+
+    @at.typecheck
+    def loss_fn(
+        model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
+    ):
+        chunked_loss, mse_loss_in, mse_loss_out = model.compute_loss(rng, observation, actions, train=True)
+        total_loss = jnp.mean(chunked_loss) + mse_loss_in + mse_loss_out
+        # 用 stop_gradient + float() 保证副产物为Python标量，避免nnx.value_and_grad报错
+        return total_loss, mse_loss_in, mse_loss_out
+    # mse_loss_in, mse_loss_out = model.get_mse_loss()
+    valid_rng = jax.random.fold_in(rng, state.step)
+    observation, actions = batch
+    loss, mse_loss_in, mse_loss_out = loss_fn(model, valid_rng, observation, actions)
+    # 这里只返回loss，后续可扩展更多指标
+    info = {
+        "valid_total_loss": loss,
+        'valid_mse_loss_in': mse_loss_in,
+        'valid_mse_loss_out':mse_loss_out
+    }
+    return info
 
 
 def main(config: _config.TrainConfig):
@@ -216,15 +280,48 @@ def main(config: _config.TrainConfig):
         resume=config.resume,
     )
     init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
+    # breakpoint()
+    valid_data_size = config.valid_data_size  # 验证集比例
+    valid_interval = config.valid_interval  # 每多少步验证一次
 
-    data_loader = _data_loader.create_data_loader(
-        config,
-        sharding=data_sharding,
-        shuffle=True,
-    )
-    data_iter = iter(data_loader)
-    batch = next(data_iter)
-    logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
+    # 加载完整数据集
+    full_data_config = config.data.create(config.assets_dirs, config.model)
+    full_dataset = _data_loader.create_torch_dataset(full_data_config, config.model.action_horizon, config.model)
+    full_len = len(full_dataset)
+    valid_len = int(full_len * valid_data_size)
+    train_len = full_len - valid_len
+    indices = np.arange(full_len)
+    np.random.seed(config.seed)
+    np.random.shuffle(indices)
+    train_indices = indices[:train_len]
+    valid_indices = indices[train_len:]
+
+    train_dataset = Subset(full_dataset, train_indices)
+    valid_dataset = Subset(full_dataset, valid_indices)
+
+    # 用DataLoaderImpl包装，保证输出(batch_observation, batch_actions)
+    def make_loader(dataset, shuffle, sharding, batch_size, num_workers, seed):
+        # 先transform
+        dataset = _data_loader.transform_dataset(dataset, full_data_config)
+        torch_loader = _data_loader.TorchDataLoader(
+            dataset,
+            local_batch_size=batch_size // jax.process_count(),
+            sharding=sharding,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            seed=seed,
+        )
+        # DataLoaderImpl包装，返回(Observation, Actions)
+        return _data_loader.DataLoaderImpl(full_data_config, torch_loader)
+
+    train_loader = make_loader(train_dataset, True, data_sharding, config.batch_size, config.num_workers, config.seed)
+    valid_loader = make_loader(valid_dataset, False, data_sharding, config.batch_size, 0, config.seed+1)
+
+    train_data_iter = iter(train_loader)
+    valid_data_iter = iter(valid_loader)
+    batch = next(train_data_iter)
+    logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
+    logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
 
     # Log images from first batch to sanity check.
     images_to_log = [
@@ -238,7 +335,7 @@ def main(config: _config.TrainConfig):
     logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
 
     if resuming:
-        train_state = _checkpoints.restore_state(checkpoint_manager, train_state, data_loader)
+        train_state = _checkpoints.restore_state(checkpoint_manager, train_state, train_loader)
 
     ptrain_step = jax.jit(
         functools.partial(train_step, config),
@@ -267,14 +364,44 @@ def main(config: _config.TrainConfig):
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
-        batch = next(data_iter)
-
+        # 每valid_interval步进行一次验证
+        if step % valid_interval == 0:
+            try:
+                valid_batch = next(valid_data_iter)
+            except StopIteration:
+                valid_data_iter = iter(valid_loader)
+                valid_batch = next(valid_data_iter)
+            valid_info = valid_step(config, train_rng, train_state, valid_batch)
+            valid_info = jax.device_get(valid_info)
+            pbar.write(f"Step {step}: valid_loss={valid_info['valid_total_loss']:.4f}")
+            wandb.log(valid_info, step=step)
+        try:
+            batch = next(train_data_iter)
+        except StopIteration:
+            train_data_iter = iter(train_loader)
+            batch = next(train_data_iter)
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
+            _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()
 
 
 if __name__ == "__main__":
+    import os
+    import sys
+    # 在 VSCode 里直接 Run 时，先设置好环境变量
+    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
+    # 设置使用的GPU设备
+    os.environ["CUDA_VISIBLE_DEVICES"] = "6, 7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+
+    # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
+    sys.argv = [
+        sys.argv[0],            # 脚本名
+        "pi0_bridge",       # 第一个位置参数
+        "--exp-name", "pi0_bridge",
+        "--overwrite",
+        "--data.repo-id", "lddddl/dobot_formate_0611",
+    ] 
+    
     main(_config.cli())

@@ -12,6 +12,7 @@ from enum import auto
 class DroidActionSpace(Enum):
     """Action space for DROID dataset."""
 
+    
     JOINT_POSITION = auto()
     JOINT_VELOCITY = auto()
 

@@ -4,6 +4,15 @@ import logging
 import math
 import pathlib
 
+# import sys
+# import os
+# # 添加第三方库路径到 sys.path（关键修改）
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# THIRD_PARTY_PATH = os.path.join(BASE_DIR, "third_party", "libero")
+# sys.path.insert(0, THIRD_PARTY_PATH)
+
+
+
 import imageio
 from libero.libero import benchmark
 from libero.libero import get_libero_path
@@ -128,17 +137,17 @@ def eval_libero(args: Args) -> None:
                         # Finished executing previous action chunk -- compute new chunk
                         # Prepare observations dict
                         element = {
-                            "observation/image": img,
-                            "observation/wrist_image": wrist_img,
+                            "observation/image": img, # shape[224,224,3]
+                            "observation/wrist_image": wrist_img, # shape[224,224,3]
                             "observation/state": np.concatenate(
                                 (
                                     obs["robot0_eef_pos"],
                                     _quat2axisangle(obs["robot0_eef_quat"]),
                                     obs["robot0_gripper_qpos"],
                                 )
-                            ),
+                            ), # observation/state
                             "prompt": str(task_description),
-                        }
+                        } # 'pick up the black bowl between the plate and the ramekin and place it on the plate'
 
                         # Query model to get action
                         action_chunk = client.infer(element)["actions"]
@@ -156,6 +165,7 @@ def eval_libero(args: Args) -> None:
                         total_successes += 1
                         break
                     t += 1
+                    import pdb; pdb.set_trace()
 
                 except Exception as e:
                     logging.error(f"Caught exception: {e}")
@@ -213,7 +223,7 @@ def _quat2axisangle(quat):
 
     return (quat[:3] * 2.0 * math.acos(quat[3])) / den
 
-
 if __name__ == "__main__":
+    
     logging.basicConfig(level=logging.INFO)
     tyro.cli(eval_libero)

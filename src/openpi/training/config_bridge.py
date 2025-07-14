@@ -1,0 +1,841 @@
+"""查看 _CONFIGS 获取可用配置列表。"""
+
+import abc
+from collections.abc import Sequence
+import dataclasses
+from dataclasses import field
+import difflib
+import logging
+import pathlib
+from typing import Any, Protocol, TypeAlias
+
+import etils.epath as epath
+import flax.nnx as nnx
+from typing_extensions import override
+import tyro
+
+import openpi.models.model as _model
+import openpi.models.pi0 as pi0
+import openpi.models.pi0_fast as pi0_fast
+import openpi.models.tokenizer as _tokenizer
+import openpi.policies.aloha_policy as aloha_policy
+import openpi.policies.droid_policy as droid_policy
+import openpi.policies.libero_policy as libero_policy
+import openpi.shared.download as _download
+import openpi.shared.normalize as _normalize
+import openpi.training.droid_rlds_dataset as droid_rlds_dataset
+import openpi.training.optimizer as _optimizer
+import openpi.training.weight_loaders as weight_loaders
+import openpi.transforms as _transforms
+
+ModelType: TypeAlias = _model.ModelType
+# 解决 tyro 直接使用 nnx.filterlib.Filter 的问题。
+Filter: TypeAlias = nnx.filterlib.Filter
+
+
+@dataclasses.dataclass(frozen=True)
+class AssetsConfig:
+    """确定将用于设置数据管道的资产（例如，标准化统计）的位置。
+
+    这些资产将在检查点内的 `assets/asset_id` 目录下复制。
+
+    这可用于从不同的检查点（例如，基础模型检查点）或某些其他集中位置加载资产。
+    例如，要在微调期间从基础模型检查点加载 Trossen 机器人的标准化统计，请使用：
+
+    ```
+    AssetsConfig(
+        assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+        asset_id="trossen",
+    )
+    ```
+    """
+
+    # 资产目录。如果未提供，将使用配置的 assets_dirs。这对于从不同检查点（例如，基础模型检查点）
+    # 或某些其他集中位置加载资产很有用。
+    assets_dir: str | None = None
+
+    # 资产 ID。如果未提供，将使用 repo id。这允许用户引用描述不同机器人平台的资产。
+    asset_id: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class DataConfig:
+    # LeRobot repo id。如果为 None，将创建假数据。
+    repo_id: str | None = None
+    # 包含数据资产的资产目录内的目录。
+    asset_id: str | None = None
+    # 包含预计算的标准化统计。如果为 None，将不执行标准化。
+    norm_stats: dict[str, _transforms.NormStats] | None = None
+
+    # 用于将数据集特定格式的输入调整为数据转换期望的通用格式。
+    repack_transforms: _transforms.Group = dataclasses.field(default_factory=_transforms.Group)
+    # 数据转换，通常包括机器人特定的转换。将在数据标准化之前应用。
+    # 参见 `model.Observation` 和 `model.Actions` 了解标准化数据。
+    data_transforms: _transforms.Group = dataclasses.field(default_factory=_transforms.Group)
+    # 模型特定的转换。将在数据标准化之后应用。
+    model_transforms: _transforms.Group = dataclasses.field(default_factory=_transforms.Group)
+    # 如果为 true，将使用分位数标准化。否则，将使用正常的 z-score 标准化。
+    use_quantile_norm: bool = False
+
+    # 数据加载器将用于生成动作序列的键名。序列的长度由模型配置中的 `action_horizon` 字段定义。
+    # 如果您的 LeRobot 数据集使用不同的键来表示动作，则应调整此项。
+    action_sequence_keys: Sequence[str] = ("actions",)
+
+    # 如果为 true，将使用 LeRobot 数据集任务来定义提示。
+    prompt_from_task: bool = False
+
+    # 仅用于 RLDS 数据加载器（即目前仅用于 DROID）。
+    rlds_data_dir: str | None = None
+    # DROID 数据集的动作空间。
+    action_space: droid_rlds_dataset.DroidActionSpace | None = None
+
+    
+
+class GroupFactory(Protocol):
+    def __call__(self, model_config: _model.BaseModelConfig) -> _transforms.Group:
+        """创建一个组。"""
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelTransformFactory(GroupFactory):
+    """为标准 pi0 模型创建模型转换。"""
+
+    # 如果提供，将确定模型将使用的默认提示。
+    default_prompt: str | None = None
+
+    def __call__(self, model_config: _model.BaseModelConfig) -> _transforms.Group:
+        match model_config.model_type:
+            case _model.ModelType.PI0:
+                return _transforms.Group(
+                    inputs=[
+                        _transforms.InjectDefaultPrompt(self.default_prompt),
+                        _transforms.ResizeImages(224, 224),
+                        _transforms.TokenizePrompt(
+                            _tokenizer.PaligemmaTokenizer(model_config.max_token_len),
+                        ),
+                    ],
+                )
+            case _model.ModelType.PI0_FAST:
+                return _transforms.Group(
+                    inputs=[
+                        _transforms.InjectDefaultPrompt(self.default_prompt),
+                        _transforms.ResizeImages(224, 224),
+                        _transforms.TokenizeFASTInputs(
+                            _tokenizer.FASTTokenizer(model_config.max_token_len),
+                        ),
+                    ],
+                    outputs=[
+                        _transforms.ExtractFASTActions(
+                            _tokenizer.FASTTokenizer(model_config.max_token_len),
+                            action_horizon=model_config.action_horizon,
+                            action_dim=model_config.action_dim,
+                        )
+                    ],
+                )
+
+
+@dataclasses.dataclass(frozen=True)
+class DataConfigFactory(abc.ABC):
+    # LeRobot repo id。
+    repo_id: str = tyro.MISSING
+    # 确定如何加载资产。
+    assets: AssetsConfig = dataclasses.field(default_factory=AssetsConfig)
+    # 将被工厂更新的基础配置。
+    base_config: tyro.conf.Suppress[DataConfig | None] = None
+
+    @abc.abstractmethod
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        """创建数据配置。"""
+
+    def create_base_config(self, assets_dirs: pathlib.Path) -> DataConfig:
+        repo_id = self.repo_id if self.repo_id is not tyro.MISSING else None
+        asset_id = self.assets.asset_id or repo_id
+        return dataclasses.replace(
+            self.base_config or DataConfig(),
+            repo_id=repo_id,
+            asset_id=asset_id,
+            norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
+        )
+
+    def _load_norm_stats(self, assets_dir: epath.Path, asset_id: str | None) -> dict[str, _transforms.NormStats] | None:
+        if asset_id is None:
+            return None
+        try:
+            data_assets_dir = str(assets_dir / asset_id)
+            norm_stats = _normalize.load(_download.maybe_download(data_assets_dir))
+            logging.info(f"从 {data_assets_dir} 加载标准化统计")
+            return norm_stats
+        except FileNotFoundError:
+            logging.info(f"在 {data_assets_dir} 中未找到标准化统计，跳过。")
+        return None
+
+
+@dataclasses.dataclass(frozen=True)
+class FakeDataConfig(DataConfigFactory):
+    repo_id: str = "fake"
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        return DataConfig(repo_id=self.repo_id)
+
+
+@dataclasses.dataclass(frozen=True)
+class SimpleDataConfig(DataConfigFactory):
+    # 数据转换的工厂。
+    data_transforms: tyro.conf.Suppress[GroupFactory] = dataclasses.field(default_factory=GroupFactory)
+    # 模型转换的工厂。
+    model_transforms: tyro.conf.Suppress[GroupFactory] = dataclasses.field(default_factory=ModelTransformFactory)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs),
+            data_transforms=self.data_transforms(model_config),
+            model_transforms=self.model_transforms(model_config),
+            use_quantile_norm=model_config.model_type == ModelType.PI0_FAST,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotAlohaDataConfig(DataConfigFactory):
+    # 如果为 true，将在传递给模型之前将关节维度转换为相对于当前状态的增量。
+    # 夹爪维度将保持为绝对值。
+    use_delta_joint_actions: bool = True
+    # 如果提供，将在输入数据中注入（如果不存在 "prompt" 键）。
+    default_prompt: str | None = None
+    # 如果为 true，这将把关节和夹爪值从标准 Aloha 空间转换为用于训练基础模型的 pi 内部运行时使用的空间。
+    # 使用标准 Aloha 数据的人应该将此设置为 true。
+    adapt_to_pi: bool = True
+
+    # 重新打包转换。
+    repack_transforms: tyro.conf.Suppress[_transforms.Group] = dataclasses.field(
+        default=_transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "images": {"cam_high": "observation.images.top"},
+                        "state": "observation.state",
+                        "actions": "action",
+                    }
+                )
+            ]
+        )
+    )
+    # 将用于从数据集读取动作序列的动作键。
+    action_sequence_keys: Sequence[str] = ("action",)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        data_transforms = _transforms.Group(
+            inputs=[aloha_policy.AlohaInputs(action_dim=model_config.action_dim, adapt_to_pi=self.adapt_to_pi)],
+            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi)],
+        )
+        if self.use_delta_joint_actions:
+            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs),
+            repack_transforms=self.repack_transforms,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotLiberoDataConfig(DataConfigFactory):
+    """
+    此配置用于配置在数据管道的各个部分应用的转换。
+    对于您自己的数据集，您可以复制此类并根据下面的注释修改转换以匹配您的数据集。
+    """
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # 重新打包转换*仅*应用于来自数据集的数据，*不*在推理期间应用。
+        # 我们可以使用它来使来自数据集的输入看起来尽可能接近来自推理环境的输入（例如匹配键）。
+        # 下面，我们匹配数据集中的键（我们在数据转换脚本中定义的）与我们推理管道中使用的键
+        # （在 libero 的推理脚本中定义的）。
+        # 对于您自己的数据集，首先确定您的环境传递给策略服务器的键，
+        # 然后修改下面的映射，使您数据集的键匹配到这些目标键。
+        # 重新打包转换只是在这里重新映射键名。
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/image": "image",
+                        "observation/wrist_image": "wrist_image",
+                        "observation/state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        # 数据转换应用于来自数据集的数据*和*推理期间。
+        # 下面，我们定义进入模型的转换（``inputs``）和来自模型的转换（``outputs``）
+        # （后者仅在推理期间使用）。
+        # 我们在 `libero_policy.py` 中定义了这些转换。您可以查看那里的详细注释，
+        # 了解如何修改转换以匹配您的数据集。一旦您创建了自己的转换，
+        # 您可以用自己的转换替换下面的转换。
+        data_transforms = _transforms.Group(
+            inputs=[libero_policy.LiberoInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
+            outputs=[libero_policy.LiberoOutputs()],
+        )
+
+        # 一个额外的数据转换：pi0 模型在增量动作上训练（相对于每个动作块中的第一个状态）。
+        # 如果您的数据有``绝对``动作（例如目标关节角度），您可以取消注释以下行以将动作转换为增量动作。
+        # 唯一的例外是夹爪动作，它们始终是绝对的。
+        # 在下面的示例中，我们将对前 6 个动作（关节）应用增量转换，并保持第 7 个动作（夹爪）不变，即绝对。
+        # 在 Libero 中，数据集中的原始动作已经是增量动作，所以我们*不需要*应用单独的增量转换（这就是为什么它被注释掉的原因）。
+        # 根据您的数据集是否开箱即用地使用``绝对``或``增量``动作来选择是否应用此转换。
+
+        # TODO(karl): 一旦我们更新了 Libero 检查点以不使用增量动作转换，就注释掉这个
+        delta_action_mask = _transforms.make_bool_mask(6, -1)
+        data_transforms = data_transforms.push(
+            inputs=[_transforms.DeltaActions(delta_action_mask)],
+            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+        )
+
+        # 模型转换包括诸如标记化提示和动作目标之类的事情
+        # 对于您自己的数据集，您不需要在这里更改任何内容。
+        model_transforms = ModelTransformFactory()(model_config)
+
+        # 我们返回用于训练和推理的所有数据转换。这里不需要更改任何内容。
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class RLDSDroidDataConfig(DataConfigFactory):
+    """
+    用于在 DROID 上训练的配置，使用 RLDS 数据格式（用于在更大数据集上进行高效训练）。
+    """
+
+    rlds_data_dir: str | None = None
+    action_space: droid_rlds_dataset.DroidActionSpace | None = None
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/exterior_image_1_left": "observation/image",
+                        "observation/wrist_image_left": "observation/wrist_image",
+                        "observation/joint_position": "observation/joint_position",
+                        "observation/gripper_position": "observation/gripper_position",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[droid_policy.DroidInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
+            outputs=[droid_policy.DroidOutputs()],
+        )
+
+        if self.action_space == droid_rlds_dataset.DroidActionSpace.JOINT_POSITION:
+            # 数据加载器返回绝对关节位置动作 -- 转换为增量动作进行训练。
+            delta_action_mask = _transforms.make_bool_mask(7, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        assert self.rlds_data_dir is not None, "RLDS 数据加载器需要设置 rlds 数据目录。"
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            use_quantile_norm=model_config.model_type == ModelType.PI0_FAST,
+            rlds_data_dir=self.rlds_data_dir,
+            action_space=self.action_space,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class TrainConfig:
+    # 配置的名称。必须是唯一的。将用于引用此配置。
+    name: tyro.conf.Suppress[str]
+    # 项目名称。
+    project_name: str = "openpi"
+    # 实验名称。将用于命名元数据和检查点目录。
+    exp_name: str = tyro.MISSING
+
+    # 定义模型配置。某些属性（action_dim、action_horizon 和 max_token_len）由所有模型共享
+    # -- 参见 BaseModelConfig。特定模型实现（例如，Pi0Config）继承自 BaseModelConfig，
+    # 可能定义其他属性。
+    model: _model.BaseModelConfig = dataclasses.field(default_factory=pi0.Pi0Config)
+
+    # 权重加载器可以在模型初始化后从磁盘加载（可能是部分的）权重。
+    weight_loader: weight_loaders.WeightLoader = dataclasses.field(default_factory=weight_loaders.NoOpWeightLoader)
+
+    lr_schedule: _optimizer.LRScheduleConfig = dataclasses.field(default_factory=_optimizer.CosineDecaySchedule)
+    optimizer: _optimizer.OptimizerConfig = dataclasses.field(default_factory=_optimizer.AdamW)
+    ema_decay: float | None = 0.99
+
+    # 指定应该冻结哪些权重。
+    freeze_filter: tyro.conf.Suppress[Filter] = dataclasses.field(default_factory=nnx.Nothing)
+
+    # 确定要训练的数据。
+    data: DataConfigFactory = dataclasses.field(default_factory=FakeDataConfig)
+
+    # 配置资产的基础目录（例如，标准化统计）。
+    assets_base_dir: str = "./assets"
+    # 检查点的基础目录。
+    checkpoint_base_dir: str = "./checkpoints"
+
+    # 训练期间随机生成器将使用的随机种子。
+    seed: int = 42
+    # 全局批次大小。
+    batch_size: int = 32
+    # 数据加载器要使用的工作进程数。增加此数字将加快数据加载速度，
+    # 但会增加内存和 CPU 使用量。
+    num_workers: int = 2
+    # 要运行的训练步数（批次）。
+    num_train_steps: int = 30_000
+    
+    device_id: int = 0
+
+    # 记录训练指标的频率（以步为单位）。
+    log_interval: int = 100
+    # 保存检查点的频率（以步为单位）。
+    save_interval: int = 1000
+    # 如果设置，任何匹配 step % keep_period == 0 的现有检查点将不会被删除。
+    keep_period: int | None = 5000
+
+    # 如果为 true，如果检查点目录已存在，将覆盖它。
+    overwrite: bool = False
+    # 如果为 true，将从最后一个检查点恢复训练。
+    resume: bool = False
+
+    # 如果为 true，将启用 wandb 日志记录。
+    wandb_enabled: bool = False
+
+    # 用于将元数据传递给策略服务器。
+    policy_metadata: dict[str, Any] | None = None
+
+    # 如果值大于 1，将启用 FSDP 并在指定数量的设备上分片；
+    # 总体设备内存将减少，但训练可能会变慢。
+    # 例如，如果总设备是 4 且 fsdp 设备是 2；那么模型将分片到 2 个设备，
+    # 并在 2 组设备之间运行数据并行。
+    fsdp_devices: int = 1
+    
+    bridge_config: Any = field(init=False)
+
+    
+
+    @property
+    def assets_dirs(self) -> pathlib.Path:
+        """获取此配置的资产目录。"""
+        return (pathlib.Path(self.assets_base_dir) / self.name).resolve()
+
+    @property
+    def checkpoint_dir(self) -> pathlib.Path:
+        """获取此配置的检查点目录。"""
+        if not self.exp_name:
+            raise ValueError("必须设置 --exp_name")
+        return (pathlib.Path(self.checkpoint_base_dir) / self.name / self.exp_name).resolve()
+
+    @property
+    def trainable_filter(self) -> nnx.filterlib.Filter:
+        """获取可训练参数的过滤器。"""
+        return nnx.All(nnx.Param, nnx.Not(self.freeze_filter))
+
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'bridge_config', self._init_bridge_config())
+        if self.resume and self.overwrite:
+            raise ValueError("不能同时恢复和覆盖。")
+        
+    def _init_bridge_config(self):
+        
+        import argparse
+        parser = argparse.ArgumentParser()
+        
+        parser.set_defaults(entry=lambda cmd_args: parser.print_help())
+
+        parser.add_argument("--refresh_replay", action="store_true", default=False)
+        parser.add_argument("--mvt_cfg_path", type=str, default="../bridgevla/mvt/configs/rvt2.yaml")
+        parser.add_argument("--exp_cfg_path", type=str, default="configs/real.yaml")
+
+        parser.add_argument("--mvt_cfg_opts", type=str, default="")
+        parser.add_argument("--exp_cfg_opts", type=str, default="")
+        parser.add_argument("--exp_note", type=str, default="")
+
+        parser.add_argument("--log-dir", type=str, default="/home/wzh/BridgeVLA/finetune/Real/logs")
+        parser.add_argument("--data_folder", type=str, default="/home/wzh/BridgeVLA/finetune/Real/data/0616_open_the_door")
+        parser.add_argument("--test_data_folder", type=str, default=None, help="Path to test dataset folder")
+        parser.add_argument("--eval_interval", type=int, default=5, help="Interval between evaluations in epochs")
+        
+        parser.add_argument("--with-eval", action="store_true", default=False)
+        parser.add_argument("--debug", action="store_true")
+        parser.add_argument("--palligemma_type", type=int, default=1)
+        parser.add_argument("--layer_index", type=int, default=-1)
+        parser.add_argument("--ep_per_task", type=int, default=5)
+        parser.add_argument("--layer_concat", action="store_true",default=False)
+        parser.add_argument("--colossum", action="store_true")
+        parser.add_argument("--few_shot", action="store_true")
+        
+        parser.add_argument("--freeze_language_model", action="store_true")
+        parser.add_argument("--freeze_vision_tower", action="store_true")
+        parser.add_argument("--load_pretrain", action="store_true")
+        parser.add_argument("--add_proprio", action="store_true")
+        parser.add_argument("--lr", type=float, default=8e-6)
+        parser.add_argument("--pretrained_rlbench_dir", type=str, default=None)
+        parser.add_argument("--pretrain_path", type=str, default=None)
+        parser.add_argument("--output_arm_flag", action="store_true", default=False, help="是否输出机械臂flag")
+        parser.add_argument(
+            "--cameras",
+            type=str,  # 每个值的类型
+            nargs="+",  # 接受一个或多个值
+            default=["3rd"],  # 默认值
+            help="List of camera names"
+        )
+        parser.add_argument("--update_dpo", action="store_true",default=False, help="使用DPO训练模式")
+        parser.add_argument("--dpo_beta", type=float, default=0.1, help="DPO温度参数beta")
+        parser.add_argument("--device", type=str, default='cuda:0', help="which device will used")
+        parser.add_argument("--data_path", type=str, default='/home/ldl/vla/openpi/datasets/20250627', help="dobot_formate_dual_arm_open_door_0627")
+        parser.add_argument("--exp_id", type=str, default='rvt2_vlm', help="")
+        parser.add_argument("--bs", type=int, default=4, help="")
+        parser.add_argument("--num_workers", type=int, default=4, help="")
+        parser.add_argument("--epochs", type=int, default=300, help="")
+        parser.add_argument("--train_iter", type=int, default=16000, help="")
+        
+        
+        
+        # parser.add_argument("--reference_model_path", type=str, default=None, help="参考模型路径，用于DPO训练")
+        cmd_args = parser.parse_args(args=[])
+        
+        return cmd_args
+
+
+# 如果您需要在代码中按名称获取配置，请使用 `get_config`。
+_CONFIGS = [
+    #
+    # 推理 Aloha 配置。
+    #
+    TrainConfig(
+        name="pi0_aloha",
+        model=pi0.Pi0Config(),
+        data=LeRobotAlohaDataConfig(
+            assets=AssetsConfig(asset_id="trossen"),
+        ),
+    ),
+    TrainConfig(
+        name="pi0_aloha_towel",
+        model=pi0.Pi0Config(),
+        data=LeRobotAlohaDataConfig(
+            assets=AssetsConfig(asset_id="trossen"),
+            default_prompt="fold the towel",
+        ),
+    ),
+    TrainConfig(
+        name="pi0_aloha_tupperware",
+        model=pi0.Pi0Config(),
+        data=LeRobotAlohaDataConfig(
+            assets=AssetsConfig(asset_id="trossen"),
+            default_prompt="open the tupperware and put the food on the plate",
+        ),
+    ),
+    #
+    # 推理 DROID 配置。
+    #
+    TrainConfig(
+        name="pi0_droid",
+
+        model=pi0.Pi0Config(action_horizon=10),
+        data=SimpleDataConfig(
+            assets=AssetsConfig(asset_id="droid"),
+            data_transforms=lambda model_config: _transforms.Group(
+                inputs=[droid_policy.DroidInputs(action_dim=model_config.action_dim)],
+                outputs=[droid_policy.DroidOutputs()],
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+                repo_id="lerobot/droid_100",
+                
+            ),
+        ),
+    ),
+    TrainConfig(
+        name="pi0_fast_droid",
+        model=pi0_fast.Pi0FASTConfig(action_dim=8, action_horizon=10),
+        data=SimpleDataConfig(
+            assets=AssetsConfig(asset_id="droid"),
+            data_transforms=lambda model_config: _transforms.Group(
+                inputs=[droid_policy.DroidInputs(action_dim=model_config.action_dim, model_type=ModelType.PI0_FAST)],
+                outputs=[droid_policy.DroidOutputs()],
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+    ),
+    #
+    # 微调 Libero 配置。
+    #
+    # 这些训练配置定义了在您自己的数据集上微调基础模型的超参数。
+    # 它们用于定义关键元素，如您正在训练的数据集、您正在使用的基础检查点，
+    # 以及其他超参数，如运行多少训练步或使用什么学习率。
+    # 对于您自己的数据集，您可以复制此类并根据下面的注释修改数据集名称和数据转换。
+    TrainConfig(
+        # 更改名称以反映您的模型和数据集。
+        name="pi0_libero",
+        # 这里您定义模型配置 -- 在此示例中，我们使用 pi0 作为模型架构并执行*完整*微调。
+        # 在下面的示例中，我们展示了如何修改此配置以执行*低内存*（LORA）微调并使用 pi0-FAST 作为替代架构。
+        model=pi0.Pi0Config(),
+        # 这里您定义您正在训练的数据集。在此示例中，我们使用 Libero 数据集。
+        # 对于您自己的数据集，您可以将 repo_id 更改为指向您的数据集。
+        # 还要修改 DataConfig 以使用您在上面为数据集制作的新配置。
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(
+                # 此标志确定我们是否从 LeRobot 数据集中的 ``task`` 字段加载提示（即任务指令）。
+                # 如果设置为 True，提示将出现在输入字典中名为 ``prompt`` 的字段中。推荐的设置是 True。
+                prompt_from_task=True,
+            ),
+        ),
+        # 这里您定义要加载哪个预训练检查点来初始化模型。
+        # 这应该与您在上面选择的模型配置匹配 -- 即在这种情况下，我们使用 pi0 基础模型。
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        # 下面您可以定义其他超参数，如学习率、训练步数等。
+        # 查看基础 TrainConfig 类以获取可用超参数的完整列表。
+        num_train_steps=30_000,
+    ),
+
+    
+    TrainConfig(
+        name="pi0_libero_low_mem_finetune",
+        # 这是加载 pi0 模型进行 LoRA 微调的示例。
+        model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        # 冻结过滤器定义了训练期间应该冻结哪些参数。
+        # 我们在模型配置中有一个便利函数，它返回给定模型配置的默认冻结过滤器以进行 LoRA 微调。
+        # 只需确保它与您在上面选择的模型配置匹配。
+        freeze_filter=pi0.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        # 为 LoRA 微调关闭 EMA。
+        ema_decay=None,
+    ),
+    TrainConfig(
+        name="pi0_fast_libero",
+        # 这是加载 pi0-FAST 模型进行完整微调的示例。
+        # 修改 action_dim 和 action_horizon 以匹配您的数据集（动作范围等于所需动作块长度）。
+        # max_token_len 是模型可以处理的最大（非图像）标记数。
+        # 这包括标记化的提示、本体感受状态和（FAST 标记化的）动作标记。
+        # 选择此值太小可能会在序列末尾截断标记（代码会抛出警告），
+        # 而选择太大会浪费内存（因为我们将每个批次元素填充到 max_token_len）。
+        # 一个好的经验法则是对于单臂机器人使用大约 180，对于双臂机器人使用大约 250。
+        # 通常，首先在这里使用较低的值，如果您在训练期间看到许多警告，可能会增加该值。
+        model=pi0_fast.Pi0FASTConfig(action_dim=7, action_horizon=10, max_token_len=180),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        # 注意，我们在这里加载 pi0-FAST 基础模型检查点。
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_fast_libero_low_mem_finetune",
+        # 这是加载 pi0-FAST 模型进行 LoRA 微调的示例。
+        # 对于设置 action_dim、action_horizon 和 max_token_len，请参见上面的注释。
+        model=pi0_fast.Pi0FASTConfig(
+            action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora"
+        ),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=30_000,
+        # 再次，在提取指定 LoRA 微调期间应该冻结哪些参数的冻结过滤器时，
+        # 确保与上面的模型配置匹配。
+        freeze_filter=pi0_fast.Pi0FASTConfig(
+            action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora"
+        ).get_freeze_filter(),
+        # 为 LoRA 微调关闭 EMA。
+        ema_decay=None,
+    ),
+    #
+    # 微调 Aloha 配置。
+    #
+    # 这是一个测试配置，用于说明如何在自定义 LeRobot 数据集上训练。
+    # 有关如何转换和训练您自己的 Aloha 数据集的说明，请参见 examples/aloha_real/README.md
+    TrainConfig(
+        name="pi0_aloha_pen_uncap",
+        model=pi0.Pi0Config(),
+        data=LeRobotAlohaDataConfig(
+            repo_id="physical-intelligence/aloha_pen_uncap_diverse",
+            assets=AssetsConfig(
+                assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+                asset_id="trossen",
+            ),
+            default_prompt="uncap the pen",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "actions",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=20_000,
+    ),
+    #
+    # 微调 DROID 配置。
+    #
+    TrainConfig(
+        name="pi0_fast_droid_finetune",
+        model=pi0_fast.Pi0FASTConfig(
+            action_dim=8,
+            action_horizon=16,
+            max_token_len=180,
+        ),
+        data=RLDSDroidDataConfig(
+            repo_id="droid",
+            # 将此设置为您的 DROID RLDS 数据集的路径（`droid` 目录的父目录）。
+            rlds_data_dir="/home/ldl/.cache/huggingface/lerobot/lerobot",
+            action_space=droid_rlds_dataset.DroidActionSpace.JOINT_POSITION,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        num_train_steps=100_000,  # 100k 步应该足够了，在 8x H100s 上大约需要 2 天
+        batch_size=256,
+        log_interval=100,
+        save_interval=5000,
+        keep_period=20_000,
+        num_workers=0,  # 重要：RLDS DataLoader 需要 num_workers=0，内部处理多进程
+    ),
+    #
+    # ALOHA 仿真配置。此配置用于演示如何在简单的仿真环境中训练。
+    #
+    TrainConfig(
+        name="pi0_aloha_sim",
+        model=pi0.Pi0Config(),
+        data=LeRobotAlohaDataConfig(
+            repo_id="lerobot/aloha_sim_transfer_cube_human",
+            default_prompt="Transfer cube",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=20_000,
+    ),
+    #
+    # 调试配置。
+    #
+    TrainConfig(
+        name="debug",
+        data=FakeDataConfig(),
+        batch_size=2,
+        model=pi0.Pi0Config(paligemma_variant="dummy", action_expert_variant="dummy"),
+        save_interval=100,
+        overwrite=True,
+        exp_name="debug",
+        num_train_steps=10,
+        wandb_enabled=False,
+    ),
+    TrainConfig(
+        name="debug_restore",
+        data=FakeDataConfig(),
+        batch_size=2,
+        model=pi0.Pi0Config(paligemma_variant="dummy", action_expert_variant="dummy"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("./checkpoints/debug/debug/9/params"),
+        overwrite=True,
+        exp_name="debug",
+        num_train_steps=10,
+        wandb_enabled=False,
+    ),
+        
+    #
+    # 微调 Bridge 配置。
+    #
+    # 这是一个测试配置，用于说明如何在自定义 LeRobot 数据集上训练。
+    # 有关如何转换和训练您自己的 Aloha 数据集的说明，请参见 examples/aloha_real/README.md
+    TrainConfig(
+        name="pi0_bridge",
+        model=pi0.Pi0Config(),
+        data=LeRobotAlohaDataConfig(
+            repo_id=None,
+            assets=AssetsConfig(
+                assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+                asset_id="trossen",
+            ),
+            default_prompt="open the door",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_front": "observation.images.cam_front",
+                                "cam_left": "observation.images.cam_left",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=20_000,
+    ),
+    
+]
+
+if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
+    raise ValueError("配置名称必须是唯一的。")
+_CONFIGS_DICT = {config.name: config for config in _CONFIGS}
+
+
+def cli() -> TrainConfig:
+    return tyro.extras.overridable_config_cli({k: (k, v) for k, v in _CONFIGS_DICT.items()})
+
+
+def get_config(config_name: str) -> TrainConfig:
+    """按名称获取配置。"""
+    if config_name not in _CONFIGS_DICT:
+        closest = difflib.get_close_matches(config_name, _CONFIGS_DICT.keys(), n=1, cutoff=0.0)
+        closest_str = f" 您的意思是 '{closest[0]}' 吗？ " if closest else ""
+        raise ValueError(f"未找到配置 '{config_name}'。{closest_str}")
+
+    return _CONFIGS_DICT[config_name]

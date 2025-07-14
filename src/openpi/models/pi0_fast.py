@@ -13,6 +13,8 @@ import openpi.models.gemma_fast as _gemma
 import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
 import openpi.shared.nnx_utils as nnx_utils
+from jax import config
+config.update("jax_enable_x64", False)  # 默认情况下使用float32
 
 logger = logging.getLogger("openpi")
 
@@ -78,9 +80,10 @@ class Pi0FASTConfig(_model.BaseModelConfig):
     paligemma_variant: _gemma.Variant = "gemma_2b"
 
     # Set the model specific defaults.
-    action_dim: int = 32
+    action_dim: int = 8
     action_horizon: int = 32
     max_token_len: int = 250
+    end_pos_dim: int = 8
 
     @property
     @override

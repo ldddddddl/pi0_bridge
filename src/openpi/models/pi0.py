@@ -7,6 +7,7 @@ import flax.nnx.bridge as nnx_bridge
 import jax
 import jax.numpy as jnp
 from typing_extensions import override
+import optax
 
 from openpi.models import model as _model
 import openpi.models.gemma as _gemma
@@ -14,29 +15,31 @@ import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
 import openpi.shared.nnx_utils as nnx_utils
 
+from jax import config
+config.update("jax_enable_x64", False)  # 默认情况下使用float32
+
 logger = logging.getLogger("openpi")
 
 
 def make_attn_mask(input_mask, mask_ar):
-    """Adapted from big_vision.
+    """改编自 big_vision。
 
-    Tokens can attend to valid inputs tokens which have a cumulative mask_ar
-    smaller or equal to theirs. This way `mask_ar` bool[?B, N] can be used to
-    setup several types of attention, for example:
+    token可以关注到具有小于或等于其累积mask_ar的有效输入token。
+    通过这种方式，`mask_ar` bool[?B, N]可以用于设置几种类型的注意力，例如：
 
-      [[1 1 1 1 1 1]]: pure causal attention.
+      [[1 1 1 1 1 1]]: 纯因果注意力。
 
-      [[0 0 0 1 1 1]]: prefix-lm attention. The first 3 tokens can attend between
-          themselves and the last 3 tokens have a causal attention. The first
-          entry could also be a 1 without changing behaviour.
+      [[0 0 0 1 1 1]]: 前缀-lm注意力。前3个token可以相互关注，
+          最后3个token具有因果注意力。第一个条目也可以是1，
+          而不改变行为。
 
-      [[1 0 1 0 1 0 0 1 0 0]]: causal attention between 4 blocks. Tokens of a
-          block can attend all previous blocks and all tokens on the same block.
+      [[1 0 1 0 1 0 0 1 0 0]]: 4个块之间的因果注意力。一个块的token
+          可以关注所有先前的块和同一块中的所有token。
 
-    Args:
-      input_mask: bool[B, N] true if its part of the input, false if padding.
-      mask_ar: bool[?B, N] mask that's true where previous tokens cannot depend on
-        it and false where it shares the same attention mask as the previous token.
+    参数：
+      input_mask: bool[B, N] 如果是输入的一部分则为true，如果是填充则为false。
+      mask_ar: bool[?B, N] 掩码在前面的token不能依赖它的地方为true，
+        在与前一个token共享相同的注意力掩码的地方为false。
     """
     mask_ar = jnp.broadcast_to(mask_ar, input_mask.shape)
     cumsum = jnp.cumsum(mask_ar, axis=1)
@@ -49,9 +52,9 @@ def make_attn_mask(input_mask, mask_ar):
 def posemb_sincos(
     pos: at.Real[at.Array, " b"], embedding_dim: int, min_period: float, max_period: float
 ) -> at.Float[at.Array, "b {embedding_dim}"]:
-    """Computes sine-cosine positional embedding vectors for scalar positions."""
+    """为标量位置计算正弦-余弦位置嵌入向量。"""
     if embedding_dim % 2 != 0:
-        raise ValueError(f"embedding_dim ({embedding_dim}) must be divisible by 2")
+        raise ValueError(f"embedding_dim ({embedding_dim}) 必须能被2整除")
 
     fraction = jnp.linspace(0.0, 1.0, embedding_dim // 2)
     period = min_period * (max_period / min_period) ** fraction
@@ -70,11 +73,12 @@ class Pi0Config(_model.BaseModelConfig):
     paligemma_variant: _gemma.Variant = "gemma_2b"
     action_expert_variant: _gemma.Variant = "gemma_300m"
 
-    # Set the model specific defaults.
-    action_dim: int = 32
+    # 设置模型特定的默认值
+    action_dim: int = 8
     action_horizon: int = 50
     max_token_len: int = 48
-
+    end_pos_dim: int = 8
+    output_format: str = "end_pos"
     @property
     @override
     def model_type(self) -> _model.ModelType:
@@ -110,7 +114,7 @@ class Pi0Config(_model.BaseModelConfig):
         return observation_spec, action_spec
 
     def get_freeze_filter(self) -> nnx.filterlib.Filter:
-        """Returns the freeze filter based on the model config."""
+        """基于模型配置返回冻结过滤器。"""
         filters = []
         has_lora = False
         gemma_params_filter = nnx_utils.PathRegex(".*llm.*")
@@ -120,7 +124,7 @@ class Pi0Config(_model.BaseModelConfig):
                 gemma_params_filter,
             )
             if "lora" not in self.action_expert_variant:
-                # If only freeze gemma params, exclude action expert params.
+                # 如果只冻结gemma参数，排除动作专家参数
                 filters.append(
                     nnx.Not(action_expert_params_filter),
                 )
@@ -132,7 +136,7 @@ class Pi0Config(_model.BaseModelConfig):
             has_lora = True
 
         if has_lora:
-            # If any lora is used, exclude all lora params.
+            # 如果使用了任何lora，排除所有lora参数
             filters.append(
                 nnx.Not(nnx_utils.PathRegex(".*lora.*")),
             )
@@ -146,7 +150,7 @@ class Pi0(_model.BaseModel):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
-        # TODO: rewrite gemma in NNX. For now, use bridge.
+        # TODO: 用NNX重写gemma。目前，使用bridge
         llm = nnx_bridge.ToNNX(
             _gemma.Module(
                 configs=[paligemma_config, action_expert_config],
@@ -171,6 +175,11 @@ class Pi0(_model.BaseModel):
         self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
+        # 如果输出格式为joint_pos，则需要将joint_pos转换为end_pos
+        self.output_format = config.output_format
+        if config.output_format == "end_pos":
+            self.joint_2_endpos_in = nnx.Linear(config.action_dim, config.action_dim, rngs=rngs)
+            self.joint_2_endpos_out = nnx.Linear(config.action_dim, config.action_dim, rngs=rngs)
     @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation
@@ -178,7 +187,7 @@ class Pi0(_model.BaseModel):
         input_mask = []
         ar_mask = []
         tokens = []
-        # embed images
+        # 嵌入图像
         for name in obs.images:
             image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
 
@@ -190,15 +199,15 @@ class Pi0(_model.BaseModel):
                     s=image_tokens.shape[1],
                 )
             )
-            # image tokens attend to each other
+            # 图像token之间相互关注
             ar_mask += [False] * image_tokens.shape[1]
 
-        # add language (aka tokenized inputs)
+        # 添加语言（即标记化的输入）
         if obs.tokenized_prompt is not None:
             tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
             tokens.append(tokenized_inputs)
             input_mask.append(obs.tokenized_prompt_mask)
-            # full attention between image and language inputs
+            # 图像和语言输入之间的完全注意力
             ar_mask += [False] * tokenized_inputs.shape[1]
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
@@ -212,16 +221,16 @@ class Pi0(_model.BaseModel):
         input_mask = []
         ar_mask = []
         tokens = []
-        # add a single state token
+        # 添加单个状态token
         state_token = self.state_proj(obs.state)[:, None, :]
         tokens.append(state_token)
         input_mask.append(jnp.ones((obs.state.shape[0], 1), dtype=jnp.bool_))
-        # image/language inputs do not attend to state or actions
+        # 图像/语言输入不关注状态或动作
         ar_mask += [True]
 
-        # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
+        # 使用正弦-余弦位置编码嵌入时间步，敏感度范围在[0, 1]之间
         time_emb = posemb_sincos(timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0)
-        # mix timestep + action information using an MLP
+        # 使用MLP混合时间步和动作信息
         action_tokens = self.action_in_proj(noisy_actions)
         time_tokens = einops.repeat(time_emb, "b emb -> b s emb", s=self.action_horizon)
         action_time_tokens = jnp.concatenate([action_tokens, time_tokens], axis=-1)
@@ -230,7 +239,7 @@ class Pi0(_model.BaseModel):
         action_time_tokens = self.action_time_mlp_out(action_time_tokens)
         tokens.append(action_time_tokens)
         input_mask.append(jnp.ones(action_time_tokens.shape[:2], dtype=jnp.bool_))
-        # image/language/state inputs do not attend to action tokens
+        # 图像/语言/状态输入不关注动作token
         ar_mask += [True] + ([False] * (self.action_horizon - 1))
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
@@ -244,6 +253,14 @@ class Pi0(_model.BaseModel):
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
 
+        # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
+        if self.output_format == "end_pos":
+            end_pos_actions = actions
+            actions = self.joint_2_endpos_in(end_pos_actions)
+            mse_loss_in = optax.l2_loss(end_pos_actions, actions).mean()
+        else:
+            mse_loss_in = -1.0
+
         batch_shape = actions.shape[:-2]
         noise = jax.random.normal(noise_rng, actions.shape)
         time = jax.random.beta(time_rng, 1.5, 1, batch_shape) * 0.999 + 0.001
@@ -251,7 +268,7 @@ class Pi0(_model.BaseModel):
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
 
-        # one big forward pass of prefix + suffix at once
+        # 一次性完成前缀+后缀的前向传播
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         suffix_tokens, suffix_mask, suffix_ar_mask = self.embed_suffix(observation, x_t, time)
         input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
@@ -263,7 +280,23 @@ class Pi0(_model.BaseModel):
         )
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
+        if self.output_format == "end_pos":
+            # v_t = self.joint_2_endpos_out(v_t)
+            # x_0 = jax.lax.stop_gradient(self.sample_actions(rng, observation))
+            end_pos_feat = self.joint_2_endpos_out(v_t)
+            mse_loss_out = optax.l2_loss(end_pos_actions, end_pos_feat).mean()
+        else:
+            mse_loss_out = -1.0    
+        
+        return jnp.mean(jnp.square(v_t - u_t), axis=-1), mse_loss_in, mse_loss_out
+
+    @override
+    def action2endpos(self, actions: _model.Actions) -> at.Float[at.Array, "*b ah ed"]:
+        pass
+        # return self.joint_2_endpos_out(actions)
+
+
 
     @override
     def sample_actions(
@@ -274,13 +307,13 @@ class Pi0(_model.BaseModel):
         num_steps: int | at.Int[at.Array, ""] = 10,
     ) -> _model.Actions:
         observation = _model.preprocess_observation(None, observation, train=False)
-        # note that we use the convention more common in diffusion literature, where t=1 is noise and t=0 is the target
-        # distribution. yes, this is the opposite of the pi0 paper, and I'm sorry.
+        # 注意我们使用扩散文献中更常见的约定，其中t=1是噪声，t=0是目标分布
+        # 是的，这与pi0论文相反，我很抱歉
         dt = -1.0 / num_steps
         batch_size = observation.state.shape[0]
         noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
 
-        # first fill KV cache with a forward pass of the prefix
+        # 首先用前缀的前向传播填充KV缓存
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
@@ -291,21 +324,19 @@ class Pi0(_model.BaseModel):
             suffix_tokens, suffix_mask, suffix_ar_mask = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
-            # `suffix_attn_mask` is shape (b, suffix_len, suffix_len) indicating how the suffix tokens can attend to each
-            # other
+            # `suffix_attn_mask`的形状为(b, suffix_len, suffix_len)，表示后缀token如何相互关注
             suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
-            # `prefix_attn_mask` is shape (b, suffix_len, prefix_len) indicating how the suffix tokens can attend to the
-            # prefix tokens
+            # `prefix_attn_mask`的形状为(b, suffix_len, prefix_len)，表示后缀token如何关注前缀token
             prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
-            # `combined_mask` is shape (b, suffix_len, prefix_len + suffix_len) indicating how the suffix tokens (which
-            # generate the queries) can attend to the full prefix + suffix sequence (which generates the keys and values)
+            # `combined_mask`的形状为(b, suffix_len, prefix_len + suffix_len)，表示后缀token（生成查询）
+            # 如何关注完整的前缀+后缀序列（生成键和值）
             full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
             assert full_attn_mask.shape == (
                 batch_size,
                 suffix_tokens.shape[1],
                 prefix_tokens.shape[1] + suffix_tokens.shape[1],
             )
-            # `positions` is shape (b, suffix_len) indicating the positions of the suffix tokens
+            # `positions`的形状为(b, suffix_len)，表示后缀token的位置
             positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
 
             (prefix_out, suffix_out), _ = self.PaliGemma.llm(
@@ -318,8 +349,14 @@ class Pi0(_model.BaseModel):
 
         def cond(carry):
             x_t, time = carry
-            # robust to floating-point error
+            # 对浮点误差具有鲁棒性
             return time >= -dt / 2
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
+        if self.output_format == 'end_pos':
+            x_0 = self.joint_2_endpos_out(x_0)
+        
         return x_0
+    
+    # def get_mse_loss(self):
+    #     return self.mse_loss_in, self.mse_loss_out
