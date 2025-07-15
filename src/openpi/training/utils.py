@@ -13,6 +13,12 @@ from openpi.shared import array_typing as at
 @at.typecheck
 @struct.dataclass
 class TrainState:
+    """
+    Param:
+    @params: all param of model
+    @opt_state: optimizer state
+    
+    """
     step: at.Int[at.ArrayLike, ""]
     params: nnx.State
     model_def: nnx.GraphDef[_model.BaseModel]

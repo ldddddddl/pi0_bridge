@@ -114,7 +114,10 @@ class Pi0Config(_model.BaseModelConfig):
         return observation_spec, action_spec
 
     def get_freeze_filter(self) -> nnx.filterlib.Filter:
-        """基于模型配置返回冻结过滤器。"""
+        """
+        基于模型配置返回冻结过滤器。
+        返回的是所有被冻结的参数
+        """
         filters = []
         has_lora = False
         gemma_params_filter = nnx_utils.PathRegex(".*llm.*")
@@ -148,6 +151,7 @@ class Pi0Config(_model.BaseModelConfig):
 class Pi0(_model.BaseModel):
     def __init__(self, config: Pi0Config, rngs: nnx.Rngs):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
+
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
         # TODO: 用NNX重写gemma。目前，使用bridge
@@ -158,6 +162,7 @@ class Pi0(_model.BaseModel):
             )
         )
         llm.lazy_init(rngs=rngs, method="init")
+        # ViT
         img = nnx_bridge.ToNNX(
             _siglip.Module(
                 num_classes=paligemma_config.width,
@@ -178,17 +183,25 @@ class Pi0(_model.BaseModel):
         # 如果输出格式为joint_pos，则需要将joint_pos转换为end_pos
         self.output_format = config.output_format
         if config.output_format == "end_pos":
-            self.joint_2_endpos_in = nnx.Linear(config.action_dim, config.action_dim, rngs=rngs)
-            self.joint_2_endpos_out = nnx.Linear(config.action_dim, config.action_dim, rngs=rngs)
+            self.joint2endpos_head = nnx.Sequential(
+                nnx.Linear(config.action_dim, 128, rngs=rngs),
+                nnx.swish,
+                nnx.Linear(128, 64, rngs=rngs),
+                nnx.swish,
+                nnx.Linear(64, config.action_dim, rngs=rngs)
+            )
+            
+            
     @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
         input_mask = []
-        ar_mask = []
+        ar_mask = [] # auto-regressive mask
         tokens = []
         # 嵌入图像
         for name in obs.images:
+            # 使用同一ViT对图像进行编码
             image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
 
             tokens.append(image_tokens)
@@ -236,6 +249,7 @@ class Pi0(_model.BaseModel):
         action_time_tokens = jnp.concatenate([action_tokens, time_tokens], axis=-1)
         action_time_tokens = self.action_time_mlp_in(action_time_tokens)
         action_time_tokens = nnx.swish(action_time_tokens)
+        # fusion action and time emb
         action_time_tokens = self.action_time_mlp_out(action_time_tokens)
         tokens.append(action_time_tokens)
         input_mask.append(jnp.ones(action_time_tokens.shape[:2], dtype=jnp.bool_))
@@ -251,15 +265,8 @@ class Pi0(_model.BaseModel):
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
     ) -> at.Float[at.Array, "*b ah"]:
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
+        # observation augmentations
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
-
-        # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
-        if self.output_format == "end_pos":
-            end_pos_actions = actions
-            actions = self.joint_2_endpos_in(end_pos_actions)
-            mse_loss_in = optax.l2_loss(end_pos_actions, actions).mean()
-        else:
-            mse_loss_in = -1.0
 
         batch_shape = actions.shape[:-2]
         noise = jax.random.normal(noise_rng, actions.shape)
@@ -282,14 +289,10 @@ class Pi0(_model.BaseModel):
 
         # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
         if self.output_format == "end_pos":
-            # v_t = self.joint_2_endpos_out(v_t)
-            # x_0 = jax.lax.stop_gradient(self.sample_actions(rng, observation))
-            end_pos_feat = self.joint_2_endpos_out(v_t)
-            mse_loss_out = optax.l2_loss(end_pos_actions, end_pos_feat).mean()
-        else:
-            mse_loss_out = -1.0    
+            v_t_endpos = self.joint2endpos_head(v_t)
+            v_t = v_t_endpos  
         
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1), mse_loss_in, mse_loss_out
+        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
 
     @override
     def action2endpos(self, actions: _model.Actions) -> at.Float[at.Array, "*b ah ed"]:
@@ -345,6 +348,11 @@ class Pi0(_model.BaseModel):
             assert prefix_out is None
             v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
+            # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
+            if self.output_format == "end_pos":
+                v_t_endpos = self.joint2endpos_head(v_t)
+                v_t = v_t_endpos  
+
             return x_t + dt * v_t, time + dt
 
         def cond(carry):
@@ -353,8 +361,6 @@ class Pi0(_model.BaseModel):
             return time >= -dt / 2
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
-        if self.output_format == 'end_pos':
-            x_0 = self.joint_2_endpos_out(x_0)
         
         return x_0
     

@@ -10,12 +10,3 @@ uv run scripts/serve_policy.py --env DROID
 
 export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
 python examples/libero/main.py
-
-
-全量微调
-
-输入图像大小
-参数量
-步长
-action chuck: 100
-数据格式是否match
