@@ -6,10 +6,10 @@
 Setup of peract
 Author: Ankit Goyal
 """
+
 from setuptools import setup
 
-requirements = [
-]
+requirements = []
 
 setup(
     name="peract_colab",
@@ -23,4 +23,3 @@ setup(
     packages=["peract_colab"],
     install_requires=requirements,
 )
-

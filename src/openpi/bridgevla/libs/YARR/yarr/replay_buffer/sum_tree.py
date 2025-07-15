@@ -3,9 +3,6 @@
 Used for prioritized experience replay. See prioritized_replay_buffer.py
 and Schaul et al. (2015).
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
 import math
 import random
@@ -13,7 +10,7 @@ import random
 import numpy as np
 
 
-class SumTree(object):
+class SumTree:
     """A sum tree data structure for storing replay priorities.
 
     A sum tree is a complete binary tree whose leaves contain values called
@@ -61,8 +58,7 @@ class SumTree(object):
         """
         assert isinstance(capacity, int)
         if capacity <= 0:
-            raise ValueError('Sum tree capacity should be positive. Got: {}'.
-                             format(capacity))
+            raise ValueError(f"Sum tree capacity should be positive. Got: {capacity}")
 
         self.nodes = [] if nodes is None else nodes
         tree_depth = int(math.ceil(np.log2(capacity)))
@@ -101,10 +97,10 @@ class SumTree(object):
             the supplied query_value is larger than the total sum.
         """
         if self._total_priority() == 0.0:
-            raise Exception('Cannot sample from an empty sum tree.')
+            raise Exception("Cannot sample from an empty sum tree.")
 
-        if query_value and (query_value < 0. or query_value > 1.):
-            raise ValueError('query_value must be in [0, 1].')
+        if query_value and (query_value < 0.0 or query_value > 1.0):
+            raise ValueError("query_value must be in [0, 1].")
 
         # Sample a value in range [0, R), where R is the value stored at the root.
         query_value = random.random() if query_value is None else query_value
@@ -144,9 +140,9 @@ class SumTree(object):
           Exception: If the sum tree is empty (i.e. its node values sum to 0).
         """
         if self._total_priority() == 0.0:
-            raise Exception('Cannot sample from an empty sum tree.')
+            raise Exception("Cannot sample from an empty sum tree.")
 
-        bounds = np.linspace(0., 1., batch_size + 1)
+        bounds = np.linspace(0.0, 1.0, batch_size + 1)
         assert len(bounds) == batch_size + 1
         segments = [(bounds[i], bounds[i + 1]) for i in range(batch_size)]
         # TODO removed for now
@@ -178,8 +174,7 @@ class SumTree(object):
           ValueError: If the given value is negative.
         """
         if value < 0.0:
-            raise ValueError('Sum tree values should be nonnegative. Got {}'.
-                             format(value))
+            raise ValueError(f"Sum tree values should be nonnegative. Got {value}")
         self.max_recorded_priority = max(value, self.max_recorded_priority)
 
         delta_value = value - self.nodes[-1][node_index]
@@ -197,5 +192,4 @@ class SumTree(object):
             self.nodes[nodes_at_this_depth_idx] = nodes_at_this_depth
             node_index //= 2
 
-        assert node_index == 0, ('Sum tree traversal failed, final node index '
-                                 'is not 0.')
+        assert node_index == 0, "Sum tree traversal failed, final node index " "is not 0."

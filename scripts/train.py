@@ -15,7 +15,6 @@ import numpy as np
 import optax
 import tqdm_loggable.auto as tqdm
 import wandb
-import math
 
 import openpi.models.model as _model
 import openpi.shared.array_typing as at
@@ -28,15 +27,19 @@ import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
 
+
 # 顶层定义Subset类，便于PyTorch DataLoader多进程pickle
 class Subset:
     def __init__(self, dataset, indices):
         self.dataset = dataset
         self.indices = indices
+
     def __getitem__(self, idx):
         return self.dataset[int(self.indices[idx])]
+
     def __len__(self):
         return len(self.indices)
+
 
 def init_logging():
     """Custom logging format for better readability."""
@@ -60,9 +63,10 @@ def init_logging():
 def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = False, enabled: bool = True):
     if not enabled:
         import datetime
+
         ct = datetime.datetime.now()
         strf_time = ct.strftime("%Y-%m-%d-%H-%M-%S")
-        wandb.init(mode="disabled", name=f'{strf_time}')
+        wandb.init(mode="disabled", name=f"{strf_time}")
         return
 
     ckpt_dir = config.checkpoint_dir
@@ -95,8 +99,7 @@ def partial_load(model_params, loaded_params):
             else:
                 out[k] = model_params[k]
         return out
-    else:
-        return loaded_params if loaded_params is not None else model_params
+    return loaded_params if loaded_params is not None else model_params
 
 
 def _load_weights_and_validate(loader: _weight_loaders.WeightLoader, params_shape: at.Params) -> at.Params:
@@ -176,19 +179,21 @@ def train_step(
     def loss_fn(
         model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
     ):
-        chunked_loss, mse_loss_in, mse_loss_out = model.compute_loss(rng, observation, actions, train=True)
-        total_loss = jnp.mean(chunked_loss) + mse_loss_in + mse_loss_out
+        chunked_loss = model.compute_loss(rng, observation, actions, train=True)
+        total_loss = jnp.mean(chunked_loss) 
         # 用 stop_gradient + float() 保证副产物为Python标量，避免nnx.value_and_grad报错
-        return total_loss, (mse_loss_in, mse_loss_out)
+        return total_loss
 
     train_rng = jax.random.fold_in(rng, state.step)
     observation, actions = batch
 
     # Filter out frozen params.
     diff_state = nnx.DiffState(0, config.trainable_filter)
-    (loss, (mse_loss_in, mse_loss_out)), grads = nnx.value_and_grad(loss_fn, argnums=diff_state, has_aux=True)(model, train_rng, observation, actions)
+    loss, grads = nnx.value_and_grad(loss_fn, argnums=diff_state, has_aux=False)(
+        model, train_rng, observation, actions
+    )
     # mse_loss_in, mse_loss_out = model.get_mse_loss()
-    
+
     params = state.params.filter(config.trainable_filter)
     updates, new_opt_state = state.tx.update(grads, state.opt_state, params)
     new_params = optax.apply_updates(params, updates)
@@ -217,8 +222,8 @@ def train_step(
     )
     info = {
         "train_total_loss": loss,
-        "train_mse_loss_in": mse_loss_in,
-        "train_mse_loss_out": mse_loss_out,
+        # "train_mse_loss_in": mse_loss_in,
+        # "train_mse_loss_out": mse_loss_out,
         "grad_norm": optax.global_norm(grads),
         "param_norm": optax.global_norm(kernel_params),
     }
@@ -242,16 +247,16 @@ def valid_step(
         total_loss = jnp.mean(chunked_loss) + mse_loss_in + mse_loss_out
         # 用 stop_gradient + float() 保证副产物为Python标量，避免nnx.value_and_grad报错
         return total_loss, mse_loss_in, mse_loss_out
+
     # mse_loss_in, mse_loss_out = model.get_mse_loss()
     valid_rng = jax.random.fold_in(rng, state.step)
     observation, actions = batch
     loss, mse_loss_in, mse_loss_out = loss_fn(model, valid_rng, observation, actions)
     # 这里只返回loss，后续可扩展更多指标
-    info = {
-        "valid_total_loss": loss,
-        'valid_mse_loss_in': mse_loss_in,
-        'valid_mse_loss_out':mse_loss_out
-    }
+    info = {"valid_total_loss": loss, 
+            # "valid_mse_loss_in": mse_loss_in, 
+            # "valid_mse_loss_out": mse_loss_out
+            }
     return info
 
 
@@ -315,7 +320,7 @@ def main(config: _config.TrainConfig):
         return _data_loader.DataLoaderImpl(full_data_config, torch_loader)
 
     train_loader = make_loader(train_dataset, True, data_sharding, config.batch_size, config.num_workers, config.seed)
-    valid_loader = make_loader(valid_dataset, False, data_sharding, config.batch_size, 0, config.seed+1)
+    valid_loader = make_loader(valid_dataset, False, data_sharding, config.batch_size, 0, config.seed + 1)
 
     train_data_iter = iter(train_loader)
     valid_data_iter = iter(valid_loader)
@@ -390,6 +395,7 @@ def main(config: _config.TrainConfig):
 if __name__ == "__main__":
     import os
     import sys
+
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
@@ -397,11 +403,13 @@ if __name__ == "__main__":
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
-        sys.argv[0],            # 脚本名
-        "pi0_bridge",       # 第一个位置参数
-        "--exp-name", "pi0_bridge",
+        sys.argv[0],  # 脚本名
+        "pi0_bridge",  # 第一个位置参数
+        "--exp-name",
+        "pi0_bridge",
         "--overwrite",
-        "--data.repo-id", "lddddl/dobot_formate_0611",
-    ] 
-    
+        "--data.repo-id",
+        "lddddl/dobot_formate_0611",
+    ]
+
     main(_config.cli())

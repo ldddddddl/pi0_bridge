@@ -2,13 +2,11 @@
 import pdb
 import sys
 
-import torch
 import numpy as np
+import torch
 
 
-def place_pc_in_cube(
-    pc, app_pc=None, with_mean_or_bounds=True, scene_bounds=None, no_op=False
-):
+def place_pc_in_cube(pc, app_pc=None, with_mean_or_bounds=True, scene_bounds=None, no_op=False):
     """
     calculate the transformation that would place the point cloud (pc) inside a
         cube of size (2, 2, 2). The pc is centered at mean if with_mean_or_bounds
@@ -36,7 +34,7 @@ def place_pc_in_cube(
     if with_mean_or_bounds:
         assert scene_bounds is None
     else:
-        assert not (scene_bounds is None)
+        assert scene_bounds is not None
     if with_mean_or_bounds:
         pc_mid = (torch.max(pc, 0)[0] + torch.min(pc, 0)[0]) / 2
         x_len, y_len, z_len = torch.max(pc, 0)[0] - torch.min(pc, 0)[0]

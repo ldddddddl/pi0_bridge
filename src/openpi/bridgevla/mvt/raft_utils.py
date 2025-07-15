@@ -1,16 +1,15 @@
-#Copy from https://github.com/NVlabs/RVT/blob/master/rvt/mvt/raft_utils.py
+# Copy from https://github.com/NVlabs/RVT/blob/master/rvt/mvt/raft_utils.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 class ConvexUpSample(nn.Module):
     """
     Learned convex upsampling
     """
 
-    def __init__(
-        self, in_dim, out_dim, up_ratio, up_kernel=3, mask_scale=0.1, with_bn=False
-    ):
+    def __init__(self, in_dim, out_dim, up_ratio, up_kernel=3, mask_scale=0.1, with_bn=False):
         """
 
         :param in_dim:

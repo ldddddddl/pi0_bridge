@@ -1,35 +1,41 @@
 import copy
 import logging
-from typing import List
 
+from helpers import demo_loading_utils
+from helpers import utils
+from helpers.custom_rlbench_env import CustomRLBenchEnv
+from helpers.network_utils import Conv2DBlock
+from helpers.network_utils import Conv2DUpsampleBlock
+from helpers.network_utils import DenseBlock
+from helpers.network_utils import SiameseNet
+from helpers.preprocess_agent import PreprocessAgent
 import numpy as np
-import torch
-import torch.nn as nn
 from rlbench.backend.observation import Observation
 from rlbench.demo import Demo
-from yarr.replay_buffer.prioritized_replay_buffer import \
-    PrioritizedReplayBuffer, ObservationElement
-from yarr.replay_buffer.replay_buffer import ReplayElement, ReplayBuffer
+import torch
+import torch.nn as nn
+from yarr.replay_buffer.prioritized_replay_buffer import ObservationElement
+from yarr.replay_buffer.prioritized_replay_buffer import PrioritizedReplayBuffer
+from yarr.replay_buffer.replay_buffer import ReplayBuffer
+from yarr.replay_buffer.replay_buffer import ReplayElement
 from yarr.replay_buffer.uniform_replay_buffer import UniformReplayBuffer
 
-from helpers import demo_loading_utils, utils
-from helpers.custom_rlbench_env import CustomRLBenchEnv
-from helpers.network_utils import SiameseNet, DenseBlock, Conv2DBlock, \
-    Conv2DUpsampleBlock
-from helpers.preprocess_agent import PreprocessAgent
 from agents.arm.next_best_pose_agent import NextBestPoseAgent
 from agents.arm.qattention_agent import QAttentionAgent
 
 REWARD_SCALE = 100.0
 
 
-def create_replay(batch_size: int, timesteps: int, prioritisation: bool,
-                  save_dir: str, cameras: list, env: CustomRLBenchEnv):
+def create_replay(
+    batch_size: int, timesteps: int, prioritisation: bool, save_dir: str, cameras: list, env: CustomRLBenchEnv
+):
     observation_elements = env.observation_elements
     for cname in cameras:
-        observation_elements.extend([
-            ObservationElement('%s_pixel_coord' % cname, (2,), np.int32),
-        ])
+        observation_elements.extend(
+            [
+                ObservationElement("%s_pixel_coord" % cname, (2,), np.int32),
+            ]
+        )
 
     replay_class = UniformReplayBuffer
     if prioritisation:
@@ -45,15 +51,12 @@ def create_replay(batch_size: int, timesteps: int, prioritisation: bool,
         reward_dtype=np.float32,
         update_horizon=1,
         observation_elements=observation_elements,
-        extra_replay_elements=[ReplayElement('demo', (), np.bool)]
+        extra_replay_elements=[ReplayElement("demo", (), np.bool)],
     )
     return replay_buffer
 
 
-def _point_to_pixel_index(
-        point: np.ndarray,
-        extrinsics: np.ndarray,
-        intrinsics: np.ndarray):
+def _point_to_pixel_index(point: np.ndarray, extrinsics: np.ndarray, intrinsics: np.ndarray):
     point = np.array([point[0], point[1], point[2], 1])
     world_to_cam = np.linalg.inv(extrinsics)
     point_in_cam_frame = world_to_cam.dot(point)
@@ -67,17 +70,17 @@ def _get_action(obs_tp1: Observation):
     quat = utils.normalize_quaternion(obs_tp1.gripper_pose[3:])
     if quat[-1] < 0:
         quat = -quat
-    return np.concatenate([obs_tp1.gripper_pose[:3], quat,
-                           [float(obs_tp1.gripper_open)]])
+    return np.concatenate([obs_tp1.gripper_pose[:3], quat, [float(obs_tp1.gripper_open)]])
 
 
 def _add_keypoints_to_replay(
-        replay: ReplayBuffer,
-        inital_obs: Observation,
-        demo: Demo,
-        env: CustomRLBenchEnv,
-        episode_keypoints: List[int],
-        cameras: List[str]):
+    replay: ReplayBuffer,
+    inital_obs: Observation,
+    demo: Demo,
+    env: CustomRLBenchEnv,
+    episode_keypoints: list[int],
+    cameras: list[str],
+):
     prev_action = None
     obs = inital_obs
     all_actions = []
@@ -85,44 +88,44 @@ def _add_keypoints_to_replay(
         obs_tp1 = demo[keypoint]
         action = _get_action(obs_tp1)
         all_actions.append(action)
-        terminal = (k == len(episode_keypoints) - 1)
+        terminal = k == len(episode_keypoints) - 1
         reward = float(terminal) * REWARD_SCALE if terminal else 0
         obs_dict = env.extract_obs(obs, t=k, prev_action=prev_action)
         prev_action = np.copy(action)
-        others = {'demo': True}
+        others = {"demo": True}
         final_obs = {}
         for name in cameras:
             px, py = _point_to_pixel_index(
                 obs_tp1.gripper_pose[:3],
-                obs_tp1.misc['%s_camera_extrinsics' % name],
-                obs_tp1.misc['%s_camera_intrinsics' % name])
-            final_obs['%s_pixel_coord' % name] = [py, px]
+                obs_tp1.misc["%s_camera_extrinsics" % name],
+                obs_tp1.misc["%s_camera_intrinsics" % name],
+            )
+            final_obs["%s_pixel_coord" % name] = [py, px]
         others.update(final_obs)
         others.update(obs_dict)
         timeout = False
         replay.add(action, reward, terminal, timeout, **others)
         obs = obs_tp1  # Set the next obs
     # Final step
-    obs_dict_tp1 = env.extract_obs(
-        obs_tp1, t=k + 1, prev_action=prev_action)
+    obs_dict_tp1 = env.extract_obs(obs_tp1, t=k + 1, prev_action=prev_action)
     obs_dict_tp1.update(final_obs)
     replay.add_final(**obs_dict_tp1)
     return all_actions
 
 
-def fill_replay(replay: ReplayBuffer,
-                task: str,
-                env: CustomRLBenchEnv,
-                num_demos: int,
-                demo_augmentation: bool,
-                demo_augmentation_every_n: int,
-                cameras: List[str]):
-    logging.info('Filling replay with demos...')
+def fill_replay(
+    replay: ReplayBuffer,
+    task: str,
+    env: CustomRLBenchEnv,
+    num_demos: int,
+    demo_augmentation: bool,
+    demo_augmentation_every_n: int,
+    cameras: list[str],
+):
+    logging.info("Filling replay with demos...")
     all_actions = []
     for d_idx in range(num_demos):
-        demo = env.env.get_demos(
-            task, 1, variation_number=0, random_selection=False,
-            from_episode_number=d_idx)[0]
+        demo = env.env.get_demos(task, 1, variation_number=0, random_selection=False, from_episode_number=d_idx)[0]
         episode_keypoints = demo_loading_utils.keypoint_discovery(demo)
 
         for i in range(len(demo) - 1):
@@ -136,17 +139,13 @@ def fill_replay(replay: ReplayBuffer,
                 episode_keypoints = episode_keypoints[1:]
             if len(episode_keypoints) == 0:
                 break
-            all_actions.extend(_add_keypoints_to_replay(
-                replay, obs, demo, env, episode_keypoints, cameras))
-    logging.info('Replay filled with demos.')
+            all_actions.extend(_add_keypoints_to_replay(replay, obs, demo, env, episode_keypoints, cameras))
+    logging.info("Replay filled with demos.")
     return all_actions
 
 
 class SharedNet(nn.Module):
-
-    def __init__(self,
-                 activation: str,
-                 norm: str = None):
+    def __init__(self, activation: str, norm: str = None):
         super(SharedNet, self).__init__()
         self._activation = activation
         self._norm = norm
@@ -166,11 +165,7 @@ class SharedNet(nn.Module):
 
 
 class ActorNet(nn.Module):
-
-    def __init__(self,
-                 activation: str,
-                 low_dim_size: int,
-                 norm: str = None):
+    def __init__(self, activation: str, low_dim_size: int, norm: str = None):
         super(ActorNet, self).__init__()
         self._activation = activation
         self._low_dim_size = low_dim_size
@@ -182,17 +177,16 @@ class ActorNet(nn.Module):
             Conv2DBlock(64, 64, 3, 1, activation=self._activation, norm=self._norm),
         )
         self._fcs = nn.Sequential(
-           DenseBlock(64, 64, activation=self._activation),
-           DenseBlock(64, 64, activation=self._activation),
-           DenseBlock(64, 8*2),
+            DenseBlock(64, 64, activation=self._activation),
+            DenseBlock(64, 64, activation=self._activation),
+            DenseBlock(64, 8 * 2),
         )
         self._maxp = nn.AdaptiveMaxPool2d(1)
 
     def forward(self, observation_feats, low_dim_ins):
         low_dim_feats = low_dim_ins
         _, _, h, w = observation_feats.shape
-        low_dim_feats = low_dim_feats.unsqueeze(
-            -1).unsqueeze(-1).repeat(1, 1, h, w)
+        low_dim_feats = low_dim_feats.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, h, w)
         x = torch.cat([observation_feats, low_dim_feats], dim=1)
         x = self._convs(x)
         x = self._maxp(x).squeeze(-1).squeeze(-1)
@@ -201,12 +195,7 @@ class ActorNet(nn.Module):
 
 
 class CriticNet(nn.Module):
-
-    def __init__(self,
-                 activation: str,
-                 low_dim_size: int,
-                 norm: str = None,
-                 q_conf: bool = True):
+    def __init__(self, activation: str, low_dim_size: int, norm: str = None, q_conf: bool = True):
         super(CriticNet, self).__init__()
         self._activation = activation
         self._low_dim_size = low_dim_size
@@ -218,7 +207,7 @@ class CriticNet(nn.Module):
             Conv2DBlock(64 + self._low_dim_size, 128, 3, 1, self._norm, self._activation),
             Conv2DBlock(128, 128, 3, 1, self._norm, self._activation),
             Conv2DBlock(128, 128, 3, 1, self._norm, self._activation),
-            Conv2DBlock(128, 128, 3, 1, self._norm, self._activation)
+            Conv2DBlock(128, 128, 3, 1, self._norm, self._activation),
         )
         if self._q_conf:
             self._final_conv = Conv2DBlock(128, 2, 3, 1)
@@ -232,8 +221,7 @@ class CriticNet(nn.Module):
     def forward(self, observation_feats, low_dim_ins):
         low_dim_feats = low_dim_ins
         _, _, h, w = observation_feats.shape
-        low_dim_feats = low_dim_feats.unsqueeze(
-            -1).unsqueeze(-1).repeat(1, 1, h, w)
+        low_dim_feats = low_dim_feats.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, h, w)
         x = torch.cat([observation_feats, low_dim_feats], dim=1)
         x = self._convs(x)
         if self._q_conf:
@@ -246,17 +234,18 @@ class CriticNet(nn.Module):
 
 
 class Qattention2DNet(nn.Module):
-
-    def __init__(self,
-                 siamese_net: SiameseNet,
-                 filters: List[int],
-                 kernel_sizes: List[int],
-                 strides: List[int],
-                 low_dim_state_len: int,
-                 norm: str = None,
-                 activation: str = 'relu',
-                 output_channels: int = 1,
-                 skip_connections: bool = True):
+    def __init__(
+        self,
+        siamese_net: SiameseNet,
+        filters: list[int],
+        kernel_sizes: list[int],
+        strides: list[int],
+        low_dim_state_len: int,
+        norm: str = None,
+        activation: str = "relu",
+        output_channels: int = 1,
+        skip_connections: bool = True,
+    ):
         super(Qattention2DNet, self).__init__()
         self._siamese_net = copy.deepcopy(siamese_net)
         self._input_channels = self._siamese_net.output_channels + low_dim_state_len
@@ -270,45 +259,37 @@ class Qattention2DNet(nn.Module):
         self._build_calls = 0
 
     def build(self):
-
         self._build_calls += 1
         if self._build_calls != 1:
-            raise RuntimeError('Build needs to be called once.')
+            raise RuntimeError("Build needs to be called once.")
         self._siamese_net.build()
         self._down = []
         ch = self._input_channels
-        for filt, ksize, stride in zip(
-                self._filters, self._kernel_sizes, self._strides):
-            conv_block = Conv2DBlock(
-                ch, filt, ksize, stride, self._norm, self._activation,
-                padding_mode='replicate')
+        for filt, ksize, stride in zip(self._filters, self._kernel_sizes, self._strides):
+            conv_block = Conv2DBlock(ch, filt, ksize, stride, self._norm, self._activation, padding_mode="replicate")
             ch = filt
             self._down.append(conv_block)
         self._down = nn.ModuleList(self._down)
 
-        reverse_conv_data = list(zip(self._filters, self._kernel_sizes,
-                                     self._strides))
+        reverse_conv_data = list(zip(self._filters, self._kernel_sizes, self._strides))
         reverse_conv_data.reverse()
 
         self._up = []
         for i, (filt, ksize, stride) in enumerate(reverse_conv_data):
             if i > 0 and self._skip_connections:
-                ch += reverse_conv_data[-i-1][0]
-            convt_block = Conv2DUpsampleBlock(
-                ch, filt, ksize, stride, self._norm, self._activation)
+                ch += reverse_conv_data[-i - 1][0]
+            convt_block = Conv2DUpsampleBlock(ch, filt, ksize, stride, self._norm, self._activation)
             ch = filt
             self._up.append(convt_block)
         self._up = nn.ModuleList(self._up)
 
-        self._final_conv = Conv2DBlock(ch, self._output_channels, 3, 1,
-                                       padding_mode='replicate')
+        self._final_conv = Conv2DBlock(ch, self._output_channels, 3, 1, padding_mode="replicate")
 
     def forward(self, observations, low_dim_ins):
         x = self._siamese_net(observations)
         _, _, h, w = x.shape
         if low_dim_ins is not None:
-            low_dim_latents = low_dim_ins.unsqueeze(
-                -1).unsqueeze(-1).repeat(1, 1, h, w)
+            low_dim_latents = low_dim_ins.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, h, w)
             x = torch.cat([x, low_dim_latents], dim=1)
         self.ups = []
         self.downs = []
@@ -329,29 +310,29 @@ class Qattention2DNet(nn.Module):
         return x
 
 
-def create_agent(camera_name: str,
-                 activation: str,
-                 q_conf: bool,
-                 action_min_max,
-                 alpha,
-                 alpha_lr,
-                 alpha_auto_tune,
-                 critic_lr,
-                 actor_lr,
-                 next_best_pose_critic_weight_decay,
-                 next_best_pose_actor_weight_decay,
-                 crop_shape,
-                 next_best_pose_tau,
-                 next_best_pose_critic_grad_clip,
-                 next_best_pose_actor_grad_clip,
-                 qattention_tau,
-                 qattention_lr,
-                 qattention_weight_decay,
-                 qattention_lambda_qreg,
-                 low_dim_state_len,
-                 qattention_grad_clip,
-                 ):
-
+def create_agent(
+    camera_name: str,
+    activation: str,
+    q_conf: bool,
+    action_min_max,
+    alpha,
+    alpha_lr,
+    alpha_auto_tune,
+    critic_lr,
+    actor_lr,
+    next_best_pose_critic_weight_decay,
+    next_best_pose_actor_weight_decay,
+    crop_shape,
+    next_best_pose_tau,
+    next_best_pose_critic_grad_clip,
+    next_best_pose_actor_grad_clip,
+    qattention_tau,
+    qattention_lr,
+    qattention_weight_decay,
+    qattention_lambda_qreg,
+    low_dim_state_len,
+    qattention_grad_clip,
+):
     siamese_net = SiameseNet(
         input_channels=[3, 3],
         filters=[8],
@@ -369,7 +350,8 @@ def create_agent(camera_name: str,
         norm=None,
         activation=activation,
         skip_connections=True,
-        low_dim_state_len=0)
+        low_dim_state_len=0,
+    )
 
     qattention_agent = QAttentionAgent(
         pixel_unet=qattention_net,
@@ -379,11 +361,11 @@ def create_agent(camera_name: str,
         weight_decay=qattention_weight_decay,
         lambda_qreg=qattention_lambda_qreg,
         include_low_dim_state=False,
-        grad_clip=qattention_grad_clip)
+        grad_clip=qattention_grad_clip,
+    )
 
-    shared_net = SharedNet(activation, norm='layer')
-    critic_net = CriticNet(activation, low_dim_state_len + 8,
-                           norm='layer', q_conf=q_conf)
+    shared_net = SharedNet(activation, norm="layer")
+    critic_net = CriticNet(activation, low_dim_state_len + 8, norm="layer", q_conf=q_conf)
     actor_net = ActorNet(activation, low_dim_state_len)
 
     next_best_pose_agent = NextBestPoseAgent(
@@ -404,6 +386,7 @@ def create_agent(camera_name: str,
         critic_tau=next_best_pose_tau,
         critic_grad_clip=next_best_pose_critic_grad_clip,
         actor_grad_clip=next_best_pose_actor_grad_clip,
-        q_conf=q_conf)
+        q_conf=q_conf,
+    )
 
     return PreprocessAgent(pose_agent=next_best_pose_agent)

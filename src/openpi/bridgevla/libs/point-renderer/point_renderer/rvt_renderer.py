@@ -1,12 +1,12 @@
-import torch
+from point_renderer.cameras import OrthographicCameras
+from point_renderer.cameras import PerspectiveCameras
 import point_renderer.ops as ops
-from point_renderer.cameras import OrthographicCameras, PerspectiveCameras
 from point_renderer.renderer import PointRenderer
-
 import point_renderer.rvt_ops as rvt_ops
+import torch
 
 
-class RVTBoxRenderer():
+class RVTBoxRenderer:
     """
     Wrapper around PointRenderer that fixes the cameras to be orthographic cameras
     on the faces of a 2x2x2 cube placed at the origin
@@ -31,8 +31,8 @@ class RVTBoxRenderer():
         two_views=False,
         one_view=False,
         add_3p=False,
-        **kwargs):
-
+        **kwargs,
+    ):
         self.renderer = PointRenderer(device=device, perf_timer=perf_timer)
 
         self.img_size = img_size
@@ -71,8 +71,9 @@ class RVTBoxRenderer():
 
     def _check_device(self, input, input_name):
         if self.strict_input_device:
-            assert str(input.device) == str(self.renderer.device), (
-                f"Input {input_name} (device {input.device}) should be on the same device as the renderer ({self.renderer.device})")
+            assert (
+                str(input.device) == str(self.renderer.device)
+            ), f"Input {input_name} (device {input.device}) should be on the same device as the renderer ({self.renderer.device})"
 
     def _get_cube_cameras(
         self,
@@ -119,7 +120,6 @@ class RVTBoxRenderer():
             if no_top:
                 del cam_names[cam_names.index("top")]
 
-
         cam_list = [cam_dict[n] for n in cam_names]
         eyes = [c["eye"] for c in cam_list]
         ats = [c["at"] for c in cam_list]
@@ -160,7 +160,8 @@ class RVTBoxRenderer():
         pcs_px = []
         for i in range(bs):
             pc_px, pc_cam = ops.project_points_3d_to_pixels(
-                pt[i], self.cameras.inv_poses, self.cameras.intrinsics, self.cameras.is_orthographic())
+                pt[i], self.cameras.inv_poses, self.cameras.intrinsics, self.cameras.is_orthographic()
+            )
             pcs_px.append(pc_px)
         pcs_px = torch.stack(pcs_px, dim=0)
         pcs_px = torch.permute(pcs_px, (0, 2, 1, 3))
@@ -194,8 +195,7 @@ class RVTBoxRenderer():
         # if self._fix_cam
         if self._fix_pts_cam is None:
             # (np, nc, 2)
-            pts_img = self.get_pt_loc_on_img(self._pts.unsqueeze(0),
-                                             fix_cam=True).squeeze(0)
+            pts_img = self.get_pt_loc_on_img(self._pts.unsqueeze(0), fix_cam=True).squeeze(0)
             # pts_img = pts_img.permute((1, 0, 2))
             # (nc, np, bs)
             fix_pts_hm, pts_cam, pts_cam_wei = rvt_ops.select_feat_from_hm(
@@ -212,15 +212,15 @@ class RVTBoxRenderer():
             )
         pts_hm.append(fix_pts_hm)
 
-        #if not dyn_cam_info is None:
+        # if not dyn_cam_info is None:
         # TODO(Valts): implement
         pts_hm = torch.cat(pts_hm, 0)
         return pts_hm, self._pts
 
     @torch.no_grad()
-    def get_max_3d_frm_hm_cube(self, hm, fix_cam=False, dyn_cam_info=None,
-                               topk=1, non_max_sup=False,
-                               non_max_sup_dist=0.02):
+    def get_max_3d_frm_hm_cube(
+        self, hm, fix_cam=False, dyn_cam_info=None, topk=1, non_max_sup=False, non_max_sup_dist=0.02
+    ):
         """
         given set of heat maps, return the 3d location of the point with the
             largest score, assumes the points are in a cube [-1, 1]. This function
@@ -263,18 +263,19 @@ class RVTBoxRenderer():
         return pts
 
     def __call__(self, pc, feat, fix_cam=False, dyn_cam_info=None):
-
         self._check_device(pc, "pc")
         self._check_device(pc, "feat")
 
-        pc_images, pc_depths = self.renderer.render_batch(pc, feat,
-                                    cameras=self.cameras,
-                                    img_size=self.img_size,
-                                    splat_radius=self.splat_radius,
-                                    default_color=self.default_color,
-                                    default_depth=self.default_depth,
-                                    aa_factor=self.aa_factor
-                                    )
+        pc_images, pc_depths = self.renderer.render_batch(
+            pc,
+            feat,
+            cameras=self.cameras,
+            img_size=self.img_size,
+            splat_radius=self.splat_radius,
+            default_color=self.default_color,
+            default_depth=self.default_depth,
+            aa_factor=self.aa_factor,
+        )
 
         if self.normalize_output:
             _, h, w = pc_depths.shape
@@ -302,5 +303,5 @@ class RVTBoxRenderer():
         #     if not os.path.exists(f'debug_img/{init_folder}'):
         #         os.makedirs(f'debug_img/{init_folder}')
         #     cv2.imwrite(f'debug_img/{init_folder}/{idx}.png', debug_img)
-            
+
         return img_out

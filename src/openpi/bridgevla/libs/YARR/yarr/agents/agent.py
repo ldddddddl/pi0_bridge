@@ -1,8 +1,9 @@
-from abc import ABC, abstractmethod
-from typing import Any, List
+from abc import ABC
+from abc import abstractmethod
+from typing import Any
 
 
-class Summary(object):
+class Summary:
     def __init__(self, name: str, value: Any):
         self.name = name
         self.value = value
@@ -30,12 +31,8 @@ class VideoSummary(Summary):
         self.fps = fps
 
 
-class ActResult(object):
-
-    def __init__(self, action: Any,
-                 observation_elements: dict = None,
-                 replay_elements: dict = None,
-                 info: dict = None):
+class ActResult:
+    def __init__(self, action: Any, observation_elements: dict = None, replay_elements: dict = None, info: dict = None):
         self.action = action
         self.observation_elements = observation_elements or {}
         self.replay_elements = replay_elements or {}
@@ -43,7 +40,6 @@ class ActResult(object):
 
 
 class Agent(ABC):
-
     @abstractmethod
     def build(self, training: bool, device=None) -> None:
         pass
@@ -62,11 +58,11 @@ class Agent(ABC):
         pass
 
     @abstractmethod
-    def update_summaries(self) -> List[Summary]:
+    def update_summaries(self) -> list[Summary]:
         pass
 
     @abstractmethod
-    def act_summaries(self) -> List[Summary]:
+    def act_summaries(self) -> list[Summary]:
         pass
 
     @abstractmethod

@@ -1,64 +1,58 @@
 import copy
 import logging
+from multiprocessing import Manager
+from multiprocessing import Process
+from multiprocessing import get_start_method
+from multiprocessing import set_start_method
 import os
 import time
-import pandas as pd
-
-from multiprocessing import Process, Manager
-from multiprocessing import get_start_method, set_start_method
 from typing import Any
 
 import numpy as np
 import torch
-from yarr.agents.agent import Agent
-from yarr.agents.agent import ScalarSummary
-from yarr.agents.agent import Summary
-from yarr.envs.env import Env
-from yarr.utils.rollout_generator import RolloutGenerator
-from yarr.utils.log_writer import LogWriter
-from yarr.utils.process_str import change_case
-from yarr.utils.video_utils import CircleCameraMotion, TaskRecorder
 
-from pyrep.objects.dummy import Dummy
-from pyrep.objects.vision_sensor import VisionSensor
+from yarr.agents.agent import Agent
+from yarr.envs.env import Env
+from yarr.utils.process_str import change_case
+from yarr.utils.rollout_generator import RolloutGenerator
 
 try:
-    if get_start_method() != 'spawn':
-        set_start_method('spawn', force=True)
+    if get_start_method() != "spawn":
+        set_start_method("spawn", force=True)
 except RuntimeError:
     pass
 
 
-class _EnvRunner(object):
-
-    def __init__(self,
-                 train_env: Env,
-                 eval_env: Env,
-                 agent: Agent,
-                 timesteps: int,
-                 train_envs: int,
-                 eval_envs: int,
-                 rollout_episodes: int,
-                 eval_episodes: int,
-                 training_iterations: int,
-                 eval_from_eps_number: int,
-                 episode_length: int,
-                 kill_signal: Any,
-                 step_signal: Any,
-                 num_eval_episodes_signal: Any,
-                 eval_epochs_signal: Any,
-                 eval_report_signal: Any,
-                 log_freq: int,
-                 rollout_generator: RolloutGenerator,
-                 save_load_lock,
-                 current_replay_ratio,
-                 target_replay_ratio,
-                 weightsdir: str = None,
-                 logdir: str = None,
-                 env_device: torch.device = None,
-                 previous_loaded_weight_folder: str = '',
-                 num_eval_runs: int = 1,
-                 ):
+class _EnvRunner:
+    def __init__(
+        self,
+        train_env: Env,
+        eval_env: Env,
+        agent: Agent,
+        timesteps: int,
+        train_envs: int,
+        eval_envs: int,
+        rollout_episodes: int,
+        eval_episodes: int,
+        training_iterations: int,
+        eval_from_eps_number: int,
+        episode_length: int,
+        kill_signal: Any,
+        step_signal: Any,
+        num_eval_episodes_signal: Any,
+        eval_epochs_signal: Any,
+        eval_report_signal: Any,
+        log_freq: int,
+        rollout_generator: RolloutGenerator,
+        save_load_lock,
+        current_replay_ratio,
+        target_replay_ratio,
+        weightsdir: str = None,
+        logdir: str = None,
+        env_device: torch.device = None,
+        previous_loaded_weight_folder: str = "",
+        num_eval_runs: int = 1,
+    ):
         self._train_env = train_env
         self._eval_env = eval_env
         self._agent = agent
@@ -102,7 +96,6 @@ class _EnvRunner(object):
         return p
 
     def spin_up_envs(self, name: str, num_envs: int, eval: bool):
-
         ps = []
         for i in range(num_envs):
             n = name + str(i)
@@ -134,12 +127,12 @@ class _EnvRunner(object):
                             # Rare case when agent hasn't finished writing.
                             time.sleep(1)
                             self._agent.load_weights(d)
-                        print('Agent %s: Loaded weights: %s' % (self._name, d))
+                        print("Agent %s: Loaded weights: %s" % (self._name, d))
                         self._new_weights = True
                     else:
                         self._new_weights = False
                     break
-            print('Waiting for weights to become available.')
+            print("Waiting for weights to become available.")
             time.sleep(1)
 
     def _get_type(self, x):
@@ -148,32 +141,31 @@ class _EnvRunner(object):
         return x.dtype
 
     def _get_task_name(self):
-        if hasattr(self._eval_env, '_task_class'):
+        if hasattr(self._eval_env, "_task_class"):
             eval_task_name = change_case(self._eval_env._task_class.__name__)
             multi_task = False
-        elif hasattr(self._eval_env, '_task_classes'):
+        elif hasattr(self._eval_env, "_task_classes"):
             if self._eval_env.active_task_id != -1:
                 task_id = (self._eval_env.active_task_id) % len(self._eval_env._task_classes)
                 eval_task_name = change_case(self._eval_env._task_classes[task_id].__name__)
             else:
-                eval_task_name = ''
+                eval_task_name = ""
             multi_task = True
         else:
-            raise Exception('Neither task_class nor task_classes found in eval env')
+            raise Exception("Neither task_class nor task_classes found in eval env")
         return eval_task_name, multi_task
 
     def _run_env(self, name: str, eval: bool):
-
         self._name = name
 
         self._agent = copy.deepcopy(self._agent)
 
         self._agent.build(training=False, device=self._env_device)
 
-        logging.info('%s: Launching env.' % name)
+        logging.info("%s: Launching env." % name)
         np.random.seed()
 
-        logging.info('Agent information:')
+        logging.info("Agent information:")
         logging.info(self._agent)
 
         env = self._train_env
@@ -183,28 +175,36 @@ class _EnvRunner(object):
         env.launch()
         for ep in range(self._rollout_episodes):
             self._load_save()
-            logging.debug('%s: Starting episode %d.' % (name, ep))
+            logging.debug("%s: Starting episode %d." % (name, ep))
             episode_rollout = []
             generator = self._rollout_generator.generator(
-                self._step_signal, env, self._agent,
-                self._episode_length, self._timesteps,
-                eval, eval_demo_seed=eval_demo_seed,
-                record_enabled=rec_cfg.enabled)
+                self._step_signal,
+                env,
+                self._agent,
+                self._episode_length,
+                self._timesteps,
+                eval,
+                eval_demo_seed=eval_demo_seed,
+                record_enabled=rec_cfg.enabled,
+            )
             try:
                 for replay_transition in generator:
                     while True:
                         if self._kill_signal.value:
                             env.shutdown()
                             return
-                        if (eval or self._target_replay_ratio is None or
-                                self._step_signal.value <= 0 or (
-                                        self._current_replay_ratio.value >
-                                        self._target_replay_ratio)):
+                        if (
+                            eval
+                            or self._target_replay_ratio is None
+                            or self._step_signal.value <= 0
+                            or (self._current_replay_ratio.value > self._target_replay_ratio)
+                        ):
                             break
                         time.sleep(1)
                         logging.debug(
-                            'Agent. Waiting for replay_ratio %f to be more than %f' %
-                            (self._current_replay_ratio.value, self._target_replay_ratio))
+                            "Agent. Waiting for replay_ratio %f to be more than %f"
+                            % (self._current_replay_ratio.value, self._target_replay_ratio)
+                        )
 
                     with self.write_lock:
                         if len(self.agent_summaries) == 0:
@@ -213,7 +213,7 @@ class _EnvRunner(object):
                             for s in self._agent.act_summaries():
                                 self.agent_summaries.append(s)
                     episode_rollout.append(replay_transition)
-            except StopIteration as e:
+            except StopIteration:
                 continue
             except Exception as e:
                 env.shutdown()

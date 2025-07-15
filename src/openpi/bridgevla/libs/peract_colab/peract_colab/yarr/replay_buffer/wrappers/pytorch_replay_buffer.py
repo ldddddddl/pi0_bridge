@@ -1,19 +1,14 @@
 # From: https://github.com/stepjam/YARR/blob/main/yarr/replay_buffer/wrappers/pytorch_replay_buffer.py
 
-import time
-from threading import Lock, Thread
 
-import os
-import torch
-import torch.distributed as dist
-from torch.utils.data import IterableDataset, DataLoader
+from torch.utils.data import DataLoader
+from torch.utils.data import IterableDataset
 
 from yarr.replay_buffer.replay_buffer import ReplayBuffer
 from yarr.replay_buffer.wrappers import WrappedReplayBuffer
 
 
 class PyTorchIterableReplayDataset(IterableDataset):
-
     def __init__(self, replay_buffer: ReplayBuffer):
         self._replay_buffer = replay_buffer
 

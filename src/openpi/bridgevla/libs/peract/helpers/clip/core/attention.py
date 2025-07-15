@@ -1,12 +1,11 @@
 """Attention module."""
 
+import cliport.models as models
+from cliport.utils import utils
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-import cliport.models as models
-from cliport.utils import utils
 
 
 class Attention(nn.Module):
@@ -19,7 +18,7 @@ class Attention(nn.Module):
         self.preprocess = preprocess
         self.cfg = cfg
         self.device = device
-        self.batchnorm = self.cfg['train']['batchnorm']
+        self.batchnorm = self.cfg["train"]["batchnorm"]
 
         self.padding = np.zeros((3, 2), dtype=int)
         max_dim = np.max(in_shape[:2])
@@ -45,10 +44,10 @@ class Attention(nn.Module):
 
     def forward(self, inp_img, softmax=True):
         """Forward pass."""
-        in_data = np.pad(inp_img, self.padding, mode='constant')
+        in_data = np.pad(inp_img, self.padding, mode="constant")
         in_shape = (1,) + in_data.shape
         in_data = in_data.reshape(in_shape)
-        in_tens = torch.from_numpy(in_data).to(dtype=torch.float, device=self.device) # [B W H 6]
+        in_tens = torch.from_numpy(in_data).to(dtype=torch.float, device=self.device)  # [B W H 6]
 
         # Rotation pivot.
         pv = np.array(in_data.shape[1:3]) // 2
@@ -70,7 +69,7 @@ class Attention(nn.Module):
         logits = torch.cat(logits, dim=0)
         c0 = self.padding[:2, 0]
         c1 = c0 + inp_img.shape[:2]
-        logits = logits[:, :, c0[0]:c1[0], c0[1]:c1[1]]
+        logits = logits[:, :, c0[0] : c1[0], c0[1] : c1[1]]
 
         logits = logits.permute(1, 2, 3, 0)  # [B W H 1]
         output = logits.reshape(1, np.prod(logits.shape))

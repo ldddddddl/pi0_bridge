@@ -2,8 +2,8 @@
 
 import numpy as np
 
-class Demo(object):
 
+class Demo:
     def __init__(self, observations, random_seed=None):
         self._observations = observations
         self.random_seed = random_seed

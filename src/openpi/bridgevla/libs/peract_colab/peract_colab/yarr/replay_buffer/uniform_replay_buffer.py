@@ -8,24 +8,23 @@ i.e. where rewards are accumulated for n steps and the intermediate trajectory
 is not exposed to the agent. This does not allow, for example, performing
 off-policy corrections.
 """
-import ctypes
+
 import collections
-import concurrent.futures
-import os
-from os.path import join
-import pickle
-from typing import List, Tuple, Type
-import time
+import logging
 import math
+
 # from threading import Lock
 import multiprocessing as mp
 from multiprocessing import Lock
-import numpy as np
-import logging
+import os
+from os.path import join
+import pickle
 
 from natsort import natsort
+import numpy as np
 
-from yarr.replay_buffer.replay_buffer import ReplayBuffer, ReplayElement
+from yarr.replay_buffer.replay_buffer import ReplayBuffer
+from yarr.replay_buffer.replay_buffer import ReplayElement
 from yarr.utils.observation_type import ObservationElement
 
 # Defines a type describing part of the tuple returned by the replay
@@ -36,11 +35,11 @@ from yarr.utils.observation_type import ObservationElement
 
 
 # String constants for storage
-ACTION = 'action'
-REWARD = 'reward'
-TERMINAL = 'terminal'
-TIMEOUT = 'timeout'
-INDICES = 'indices'
+ACTION = "action"
+REWARD = "reward"
+TERMINAL = "terminal"
+TIMEOUT = "timeout"
+INDICES = "indices"
 
 
 def invalid_range(cursor, replay_capacity, stack_size, update_horizon):
@@ -65,9 +64,7 @@ def invalid_range(cursor, replay_capacity, stack_size, update_horizon):
       np.array of size stack_size with the invalid indices.
     """
     assert cursor < replay_capacity
-    return np.array(
-        [(cursor - update_horizon + i) % replay_capacity
-         for i in range(stack_size + update_horizon)])
+    return np.array([(cursor - update_horizon + i) % replay_capacity for i in range(stack_size + update_horizon)])
 
 
 class UniformReplayBuffer(ReplayBuffer):
@@ -88,22 +85,23 @@ class UniformReplayBuffer(ReplayBuffer):
         transitions
     """
 
-    def __init__(self,
-                 batch_size: int = 32,
-                 timesteps: int = 1,
-                 replay_capacity: int = int(1e6),
-                 update_horizon: int = 1,
-                 gamma: float = 0.99,
-                 max_sample_attempts: int = 10000,
-                 action_shape: tuple = (),
-                 action_dtype: Type[np.dtype] = np.float32,
-                 reward_shape: tuple = (),
-                 reward_dtype: Type[np.dtype] = np.float32,
-                 observation_elements: List[ObservationElement] = None,
-                 extra_replay_elements: List[ReplayElement] = None,
-                 save_dir: str = None,
-                 purge_replay_on_shutdown: bool = True
-                 ):
+    def __init__(
+        self,
+        batch_size: int = 32,
+        timesteps: int = 1,
+        replay_capacity: int = int(1e6),
+        update_horizon: int = 1,
+        gamma: float = 0.99,
+        max_sample_attempts: int = 10000,
+        action_shape: tuple = (),
+        action_dtype: type[np.dtype] = np.float32,
+        reward_shape: tuple = (),
+        reward_dtype: type[np.dtype] = np.float32,
+        observation_elements: list[ObservationElement] = None,
+        extra_replay_elements: list[ReplayElement] = None,
+        save_dir: str = None,
+        purge_replay_on_shutdown: bool = True,
+    ):
         """Initializes OutOfGraphReplayBuffer.
 
         Args:
@@ -136,27 +134,23 @@ class UniformReplayBuffer(ReplayBuffer):
             extra_replay_elements = []
 
         if replay_capacity < update_horizon + timesteps:
-            raise ValueError('There is not enough capacity to cover '
-                             'update_horizon and stack_size.')
+            raise ValueError("There is not enough capacity to cover " "update_horizon and stack_size.")
 
-        logging.info(
-            'Creating a %s replay memory with the following parameters:',
-            self.__class__.__name__)
-        logging.info('\t timesteps: %d', timesteps)
-        logging.info('\t replay_capacity: %d', replay_capacity)
-        logging.info('\t batch_size: %d', batch_size)
-        logging.info('\t update_horizon: %d', update_horizon)
-        logging.info('\t gamma: %f', gamma)
+        logging.info("Creating a %s replay memory with the following parameters:", self.__class__.__name__)
+        logging.info("\t timesteps: %d", timesteps)
+        logging.info("\t replay_capacity: %d", replay_capacity)
+        logging.info("\t batch_size: %d", batch_size)
+        logging.info("\t update_horizon: %d", update_horizon)
+        logging.info("\t gamma: %f", gamma)
 
         self._disk_saving = save_dir is not None
         self._save_dir = save_dir
         self._purge_replay_on_shutdown = purge_replay_on_shutdown
         if self._disk_saving:
-            logging.info('\t saving to disk: %s', self._save_dir)
+            logging.info("\t saving to disk: %s", self._save_dir)
             os.makedirs(save_dir, exist_ok=True)
         else:
-            logging.info('\t saving to RAM')
-
+            logging.info("\t saving to RAM")
 
         self._action_shape = action_shape
         self._action_dtype = action_dtype
@@ -176,17 +170,17 @@ class UniformReplayBuffer(ReplayBuffer):
         self._create_storage()
 
         self._lock = Lock()
-        self._add_count = mp.Value('i', 0)
+        self._add_count = mp.Value("i", 0)
 
         self._replay_capacity = replay_capacity
 
-        self.invalid_range = np.zeros((self._timesteps))
+        self.invalid_range = np.zeros(self._timesteps)
 
         # When the horizon is > 1, we compute the sum of discounted rewards as a dot
         # product using the precomputed vector <gamma^0, gamma^1, ..., gamma^{n-1}>.
         self._cumulative_discount_vector = np.array(
-            [math.pow(self._gamma, n) for n in range(update_horizon)],
-            dtype=np.float32)
+            [math.pow(self._gamma, n) for n in range(update_horizon)], dtype=np.float32
+        )
 
     @property
     def timesteps(self):
@@ -201,21 +195,17 @@ class UniformReplayBuffer(ReplayBuffer):
         return self._batch_size
 
     def _create_storage(self, store=None):
-        """Creates the numpy arrays used to store transitions.
-        """
+        """Creates the numpy arrays used to store transitions."""
         self._store = {} if store is None else store
         for storage_element in self._storage_signature:
             array_shape = [self._replay_capacity] + list(storage_element.shape)
             if storage_element.name == TERMINAL:
-                self._store[storage_element.name] = np.full(
-                    array_shape, -1, dtype=storage_element.type)
+                self._store[storage_element.name] = np.full(array_shape, -1, dtype=storage_element.type)
             elif not self._disk_saving:
                 # If saving to disk, we don't need to store anything else.
-                self._store[storage_element.name] = np.empty(
-                    array_shape, dtype=storage_element.type)
+                self._store[storage_element.name] = np.empty(array_shape, dtype=storage_element.type)
 
-    def get_storage_signature(self) -> Tuple[List[ReplayElement],
-                                             List[ReplayElement]]:
+    def get_storage_signature(self) -> tuple[list[ReplayElement], list[ReplayElement]]:
         """Returns a default list of elements to be stored in this replay memory.
 
         Note - Derived classes may return a different signature.
@@ -232,9 +222,7 @@ class UniformReplayBuffer(ReplayBuffer):
 
         obs_elements = []
         for obs_element in self._observation_elements:
-            obs_elements.append(
-                ReplayElement(
-                    obs_element.name, obs_element.shape, obs_element.type))
+            obs_elements.append(ReplayElement(obs_element.name, obs_element.shape, obs_element.type))
         storage_elements.extend(obs_elements)
 
         for extra_replay_element in self._extra_replay_elements:
@@ -295,14 +283,12 @@ class UniformReplayBuffer(ReplayBuffer):
                 # Used to check that user is correctly adding transitions
                 transition[element_type.name] = -1
             else:
-                transition[element_type.name] = np.empty(
-                    element_type.shape, dtype=element_type.type)
+                transition[element_type.name] = np.empty(element_type.shape, dtype=element_type.type)
         return transition
 
-    def _add_initial_to_disk(self ,kwargs: dict):
+    def _add_initial_to_disk(self, kwargs: dict):
         for i in range(self._timesteps - 1):
-            with open(join(self._save_dir, '%d.replay' % (
-                    self._replay_capacity - 1 - i)), 'wb') as f:
+            with open(join(self._save_dir, "%d.replay" % (self._replay_capacity - 1 - i)), "wb") as f:
                 pickle.dump(kwargs, f)
 
     def _add(self, kwargs: dict):
@@ -320,7 +306,7 @@ class UniformReplayBuffer(ReplayBuffer):
                 self._store[TERMINAL] = term
                 # self._store[TERMINAL][cursor] = kwargs[TERMINAL]
 
-                with open(join(self._save_dir, '%d.replay' % cursor), 'wb') as f:
+                with open(join(self._save_dir, "%d.replay" % cursor), "wb") as f:
                     pickle.dump(kwargs, f)
                 # If first add, then pad for correct wrapping
                 if self._add_count.value == 0:
@@ -335,8 +321,8 @@ class UniformReplayBuffer(ReplayBuffer):
             with self._add_count.get_lock():
                 self._add_count.value += 1
             self.invalid_range = invalid_range(
-                self.cursor(), self._replay_capacity, self._timesteps,
-                self._update_horizon)
+                self.cursor(), self._replay_capacity, self._timesteps, self._update_horizon
+            )
 
     def _get_from_disk(self, start_index, end_index):
         """Returns the range of array at the index handling wraparound if necessary.
@@ -350,26 +336,24 @@ class UniformReplayBuffer(ReplayBuffer):
         Returns:
           np.array, with shape [end_index - start_index, array.shape[1:]].
         """
-        assert end_index > start_index, 'end_index must be larger than start_index'
+        assert end_index > start_index, "end_index must be larger than start_index"
         assert end_index >= 0
         assert start_index < self._replay_capacity
         if not self.is_full():
-            assert end_index <= self.cursor(), (
-                'Index {} has not been added.'.format(start_index))
+            assert end_index <= self.cursor(), f"Index {start_index} has not been added."
 
         # Here we fake a mini store (buffer)
-        store = {store_element.name: {}
-                 for store_element in self._storage_signature}
+        store = {store_element.name: {} for store_element in self._storage_signature}
         if start_index % self._replay_capacity < end_index % self._replay_capacity:
             for i in range(start_index, end_index):
-                with open(join(self._save_dir, '%d.replay' % i), 'rb') as f:
+                with open(join(self._save_dir, "%d.replay" % i), "rb") as f:
                     d = pickle.load(f)
                     for k, v in d.items():
                         store[k][i] = v
         else:
             for i in range(end_index - start_index):
                 idx = (start_index + i) % self._replay_capacity
-                with open(join(self._save_dir, '%d.replay' % idx), 'rb') as f:
+                with open(join(self._save_dir, "%d.replay" % idx), "rb") as f:
                     d = pickle.load(f)
                     for k, v in d.items():
                         store[k][idx] = v
@@ -388,10 +372,8 @@ class UniformReplayBuffer(ReplayBuffer):
         if (len(kwargs)) != len(signature):
             expected = str(natsort.natsorted([e.name for e in signature]))
             actual = str(natsort.natsorted(list(kwargs.keys())))
-            error_list = '\nList of expected:\n{}\nList of actual:\n{}'.format(
-                expected, actual)
-            raise ValueError('Add expects {} elements, received {}.'.format(
-                len(signature), len(kwargs)) + error_list)
+            error_list = f"\nList of expected:\n{expected}\nList of actual:\n{actual}"
+            raise ValueError(f"Add expects {len(signature)} elements, received {len(kwargs)}." + error_list)
 
         for store_element in signature:
             arg_element = kwargs[store_element.name]
@@ -405,8 +387,7 @@ class UniformReplayBuffer(ReplayBuffer):
                 arg_shape = tuple()
             store_element_shape = tuple(store_element.shape)
             if arg_shape != store_element_shape:
-                raise ValueError('arg has shape {}, expected {}'.format(
-                    arg_shape, store_element_shape))
+                raise ValueError(f"arg has shape {arg_shape}, expected {store_element_shape}")
 
     def is_empty(self):
         """Is the Replay Buffer empty?"""
@@ -422,15 +403,14 @@ class UniformReplayBuffer(ReplayBuffer):
 
     @property
     def add_count(self):
-        return np.array(self._add_count.value) #self._add_count.copy()
+        return np.array(self._add_count.value)  # self._add_count.copy()
 
     @add_count.setter
     def add_count(self, count):
         if isinstance(count, int):
-            self._add_count = mp.Value('i', count)
+            self._add_count = mp.Value("i", count)
         else:
             self._add_count = count
-
 
     def get_range(self, array, start_index, end_index):
         """Returns the range of array at the index handling wraparound if necessary.
@@ -445,21 +425,18 @@ class UniformReplayBuffer(ReplayBuffer):
         Returns:
           np.array, with shape [end_index - start_index, array.shape[1:]].
         """
-        assert end_index > start_index, 'end_index must be larger than start_index'
+        assert end_index > start_index, "end_index must be larger than start_index"
         assert end_index >= 0
         assert start_index < self._replay_capacity
         if not self.is_full():
-            assert end_index <= self.cursor(), (
-                'Index {} has not been added.'.format(start_index))
+            assert end_index <= self.cursor(), f"Index {start_index} has not been added."
 
         # Fast slice read when there is no wraparound.
         if start_index % self._replay_capacity < end_index % self._replay_capacity:
-            return_array = np.array(
-                [array[i] for i in range(start_index, end_index)])
+            return_array = np.array([array[i] for i in range(start_index, end_index)])
         # Slow list read.
         else:
-            indices = [(start_index + i) % self._replay_capacity
-                       for i in range(end_index - start_index)]
+            indices = [(start_index + i) % self._replay_capacity for i in range(end_index - start_index)]
             return_array = np.array([array[i] for i in indices])
 
         return return_array
@@ -479,8 +456,7 @@ class UniformReplayBuffer(ReplayBuffer):
         """
         return_array = np.array(self.get_range(array, start_index, end_index))
         if terminals is None:
-            terminals = self.get_range(
-                self._store[TERMINAL], start_index, end_index)
+            terminals = self.get_range(self._store[TERMINAL], start_index, end_index)
 
         terminals = terminals[:-1]
 
@@ -492,8 +468,7 @@ class UniformReplayBuffer(ReplayBuffer):
             _array = list(return_array)[:-1]
             arr_len = len(_array)
             pad_from_now = False
-            for i, (ar, term) in enumerate(
-                    zip(reversed(_array), reversed(terminals))):
+            for i, (ar, term) in enumerate(zip(reversed(_array), reversed(terminals))):
                 if term == -1 or pad_from_now:
                     # The first time we see a -1 term, means we have hit the
                     # beginning of this episode, so pad from now.
@@ -508,15 +483,11 @@ class UniformReplayBuffer(ReplayBuffer):
         return return_array
 
     def _get_element_stack(self, array, index, terminals=None):
-        state = self.get_range_stack(array,
-                                     index - self._timesteps + 1, index + 1,
-                                     terminals=terminals)
+        state = self.get_range_stack(array, index - self._timesteps + 1, index + 1, terminals=terminals)
         return state
 
     def get_terminal_stack(self, index):
-        terminal_stack = self.get_range(self._store[TERMINAL],
-                              index - self._timesteps + 1,
-                              index + 1)
+        terminal_stack = self.get_range(self._store[TERMINAL], index - self._timesteps + 1, index + 1)
         return terminal_stack
 
     def is_valid_transition(self, index):
@@ -585,22 +556,20 @@ class UniformReplayBuffer(ReplayBuffer):
         """
         if self.is_full():
             # add_count >= self._replay_capacity > self._stack_size
-            min_id = (self.cursor() - self._replay_capacity +
-                      self._timesteps - 1)
+            min_id = self.cursor() - self._replay_capacity + self._timesteps - 1
             max_id = self.cursor() - self._update_horizon
         else:
             min_id = 0
             max_id = self.cursor() - self._update_horizon
             if max_id <= min_id:
                 raise RuntimeError(
-                    'Cannot sample a batch with fewer than stack size '
-                    '({}) + update_horizon ({}) transitions.'.
-                    format(self._timesteps, self._update_horizon))
+                    "Cannot sample a batch with fewer than stack size "
+                    f"({self._timesteps}) + update_horizon ({self._update_horizon}) transitions."
+                )
 
         indices = []
         attempt_count = 0
-        while (len(indices) < batch_size and
-                       attempt_count < self._max_sample_attempts):
+        while len(indices) < batch_size and attempt_count < self._max_sample_attempts:
             index = np.random.randint(min_id, max_id) % self._replay_capacity
             if self.is_valid_transition(index):
                 indices.append(index)
@@ -608,9 +577,9 @@ class UniformReplayBuffer(ReplayBuffer):
                 attempt_count += 1
         if len(indices) != batch_size:
             raise RuntimeError(
-                'Max sample attempts: Tried {} times but only sampled {}'
-                ' valid indices. Batch size is {}'.
-                    format(self._max_sample_attempts, len(indices), batch_size))
+                f"Max sample attempts: Tried {self._max_sample_attempts} times but only sampled {len(indices)}"
+                f" valid indices. Batch size is {batch_size}"
+            )
 
         return indices
 
@@ -626,8 +595,7 @@ class UniformReplayBuffer(ReplayBuffer):
             self.transition[element_type.name] = element
         return self.transition
 
-    def sample_transition_batch(self, batch_size=None, indices=None,
-                                pack_in_dict=True):
+    def sample_transition_batch(self, batch_size=None, indices=None, pack_in_dict=True):
         """Returns a batch of transitions (including any extra contents).
 
         If get_transition_elements has been overridden and defines elements not
@@ -657,7 +625,7 @@ class UniformReplayBuffer(ReplayBuffer):
           ValueError: If an element to be sampled is missing from the
             replay buffer.
         """
-        
+
         if batch_size is None:
             batch_size = self._batch_size
         with self._lock:
@@ -669,79 +637,60 @@ class UniformReplayBuffer(ReplayBuffer):
             batch_arrays = self._create_batch_arrays(batch_size)
 
             for batch_element, state_index in enumerate(indices):
-
                 if not self.is_valid_transition(state_index):
-                    raise ValueError('Invalid index %d.' % state_index)
+                    raise ValueError("Invalid index %d." % state_index)
 
-                trajectory_indices = [(state_index + j) % self._replay_capacity
-                                      for j in range(self._update_horizon)]
-                trajectory_terminals = self._store['terminal'][
-                    trajectory_indices]
+                trajectory_indices = [(state_index + j) % self._replay_capacity for j in range(self._update_horizon)]
+                trajectory_terminals = self._store["terminal"][trajectory_indices]
                 is_terminal_transition = trajectory_terminals.any()
                 if not is_terminal_transition:
                     trajectory_length = self._update_horizon
                 else:
                     # np.argmax of a bool array returns index of the first True.
-                    trajectory_length = np.argmax(
-                        trajectory_terminals.astype(np.bool),
-                        0) + 1
+                    trajectory_length = np.argmax(trajectory_terminals.astype(np.bool), 0) + 1
 
                 next_state_index = state_index + trajectory_length
 
                 store = self._store
                 if self._disk_saving:
-                    store = self._get_from_disk(
-                        state_index - (self._timesteps - 1),
-                        next_state_index + 1)
+                    store = self._get_from_disk(state_index - (self._timesteps - 1), next_state_index + 1)
 
-                trajectory_discount_vector = (
-                    self._cumulative_discount_vector[:trajectory_length])
-                trajectory_rewards = self.get_range(store['reward'],
-                                                    state_index,
-                                                    next_state_index)
+                trajectory_discount_vector = self._cumulative_discount_vector[:trajectory_length]
+                trajectory_rewards = self.get_range(store["reward"], state_index, next_state_index)
 
                 terminal_stack = self.get_terminal_stack(state_index)
-                terminal_stack_tp1 = self.get_terminal_stack(
-                    next_state_index % self._replay_capacity)
+                terminal_stack_tp1 = self.get_terminal_stack(next_state_index % self._replay_capacity)
 
                 # Fill the contents of each array in the sampled batch.
                 assert len(transition_elements) == len(batch_arrays)
-                for element_array, element in zip(batch_arrays,
-                                                  transition_elements):
+                for element_array, element in zip(batch_arrays, transition_elements):
                     if element.is_observation:
-                        if element.name.endswith('tp1'):
-                            element_array[
-                                batch_element] = self._get_element_stack(
-                                store[element.name[:-4]],
-                                next_state_index % self._replay_capacity,
-                                terminal_stack_tp1)
+                        if element.name.endswith("tp1"):
+                            element_array[batch_element] = self._get_element_stack(
+                                store[element.name[:-4]], next_state_index % self._replay_capacity, terminal_stack_tp1
+                            )
                         else:
-                            element_array[
-                                batch_element] = self._get_element_stack(
-                                store[element.name],
-                                state_index, terminal_stack)
+                            element_array[batch_element] = self._get_element_stack(
+                                store[element.name], state_index, terminal_stack
+                            )
                     elif element.name == REWARD:
                         # compute discounted sum of rewards in the trajectory.
-                        element_array[batch_element] = np.sum(
-                            trajectory_discount_vector * trajectory_rewards,
-                            axis=0)
+                        element_array[batch_element] = np.sum(trajectory_discount_vector * trajectory_rewards, axis=0)
                     elif element.name == TERMINAL:
                         element_array[batch_element] = is_terminal_transition
                     elif element.name == INDICES:
                         element_array[batch_element] = state_index
                     elif element.name in store.keys():
-                        element_array[batch_element] = (
-                            store[element.name][state_index])
+                        element_array[batch_element] = store[element.name][state_index]
 
         if pack_in_dict:
-            batch_arrays = self.unpack_transition(
-                batch_arrays, transition_elements)
+            batch_arrays = self.unpack_transition(batch_arrays, transition_elements)
 
         # TODO: make a proper fix for this
-        if 'task' in batch_arrays:
-            del batch_arrays['task']
-        if 'task_tp1' in batch_arrays:
-            del batch_arrays['task_tp1']
+        if "task" in batch_arrays:
+            del batch_arrays["task"]
+        if "task_tp1" in batch_arrays:
+            del batch_arrays["task_tp1"]
 
         return batch_arrays
 
@@ -757,37 +706,32 @@ class UniformReplayBuffer(ReplayBuffer):
         batch_size = self._batch_size if batch_size is None else batch_size
 
         transition_elements = [
-            ReplayElement(ACTION, (batch_size,) + self._action_shape,
-                          self._action_dtype),
-            ReplayElement(REWARD, (batch_size,) + self._reward_shape,
-                          self._reward_dtype),
+            ReplayElement(ACTION, (batch_size,) + self._action_shape, self._action_dtype),
+            ReplayElement(REWARD, (batch_size,) + self._reward_shape, self._reward_dtype),
             ReplayElement(TERMINAL, (batch_size,), np.int8),
             ReplayElement(TIMEOUT, (batch_size,), np.bool),
             ReplayElement(INDICES, (batch_size,), np.int32),
         ]
 
         for element in self._observation_elements:
-            transition_elements.append(ReplayElement(
-                element.name,
-                (batch_size, self._timesteps) + tuple(element.shape),
-                element.type, True))
-            transition_elements.append(ReplayElement(
-                element.name + '_tp1',
-                (batch_size, self._timesteps) + tuple(element.shape),
-                element.type, True))
+            transition_elements.append(
+                ReplayElement(element.name, (batch_size, self._timesteps) + tuple(element.shape), element.type, True)
+            )
+            transition_elements.append(
+                ReplayElement(
+                    element.name + "_tp1", (batch_size, self._timesteps) + tuple(element.shape), element.type, True
+                )
+            )
 
         for element in self._extra_replay_elements:
-            transition_elements.append(ReplayElement(
-                element.name,
-                (batch_size,) + tuple(element.shape),
-                element.type))
+            transition_elements.append(ReplayElement(element.name, (batch_size,) + tuple(element.shape), element.type))
         return transition_elements
 
     def shutdown(self):
         if self._purge_replay_on_shutdown:
             # Safely delete replay
-            logging.info('Clearing disk replay buffer.')
-            for f in [f for f in os.listdir(self._save_dir) if '.replay' in f]:
+            logging.info("Clearing disk replay buffer.")
+            for f in [f for f in os.listdir(self._save_dir) if ".replay" in f]:
                 os.remove(join(self._save_dir, f))
 
     def using_disk(self):

@@ -21,36 +21,37 @@
 
 
 import time
+
 import torch
-import glob
-import os
+
 
 class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+    HEADER = "\033[95m"
+    OKBLUE = "\033[94m"
+    OKGREEN = "\033[92m"
+    WARNING = "\033[93m"
+    FAIL = "\033[91m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    UNDERLINE = "\033[4m"
+
 
 def colorize_time(elapsed):
     if elapsed > 1e-3:
-        return bcolors.FAIL + "{:.3e}".format(elapsed) + bcolors.ENDC
-    elif elapsed > 1e-4:
-        return bcolors.WARNING + "{:.3e}".format(elapsed) + bcolors.ENDC
-    elif elapsed > 1e-5:
-        return bcolors.OKBLUE + "{:.3e}".format(elapsed) + bcolors.ENDC
-    else:
-        return "{:.3e}".format(elapsed)
+        return bcolors.FAIL + f"{elapsed:.3e}" + bcolors.ENDC
+    if elapsed > 1e-4:
+        return bcolors.WARNING + f"{elapsed:.3e}" + bcolors.ENDC
+    if elapsed > 1e-5:
+        return bcolors.OKBLUE + f"{elapsed:.3e}" + bcolors.ENDC
+    return f"{elapsed:.3e}"
+
 
 def print_gpu_memory():
     torch.cuda.empty_cache()
     print(f"{torch.cuda.memory_allocated()//(1024*1024)} mb")
 
 
-class PerfTimer():
+class PerfTimer:
     def __init__(self, activate=False, show_memory=False, print_mode=True):
         self.activate = activate
         if activate:
@@ -64,7 +65,6 @@ class PerfTimer():
         self.loop_totals_gpu = {}
         self.loop_counts = {}
 
-
     def reset(self):
         if self.activate:
             self.counter = 0
@@ -76,7 +76,7 @@ class PerfTimer():
     def check(self, name=None):
         if self.activate:
             cpu_time = time.perf_counter() - self.prev_time
-          
+
             self.end.record()
             torch.cuda.synchronize()
 
@@ -101,18 +101,17 @@ class PerfTimer():
                     print(f"CPU Checkpoint {name}: {cpu_time_disp}s (Avg: {cpu_time_disp_avg}s)")
                     print(f"GPU Checkpoint {name}: {gpu_time_disp}s (Avg: {gpu_time_disp_avg}s)")
                 else:
-                    print("CPU Checkpoint {}: {} s".format(self.counter, cpu_time_disp))
-                    print("GPU Checkpoint {}: {} s".format(self.counter, gpu_time_disp))
+                    print(f"CPU Checkpoint {self.counter}: {cpu_time_disp} s")
+                    print(f"GPU Checkpoint {self.counter}: {gpu_time_disp} s")
                 if self.show_memory:
-                    #torch.cuda.empty_cache()
+                    # torch.cuda.empty_cache()
                     print(f"{torch.cuda.memory_allocated()//1048576}MB")
-                
 
             self.prev_time = time.perf_counter()
             self.prev_time_gpu = self.start.record()
             self.counter += 1
             return cpu_time, gpu_time
-    
+
     def get_avg_cpu_time(self, name):
         return self.loop_totals_cpu[name] / self.loop_counts[name]
 

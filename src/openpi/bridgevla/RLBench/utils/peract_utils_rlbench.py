@@ -1,9 +1,8 @@
-#Adapted from https://github.com/NVlabs/RVT/blob/master/rvt/utils/peract_utils.py
+# Adapted from https://github.com/NVlabs/RVT/blob/master/rvt/utils/peract_utils.py
+import numpy as np
 from omegaconf import OmegaConf
-import numpy as np  
-from ...models.peract_official import create_agent_our
-from .peract_colab.peract_colab.arm.utils import stack_on_channel
 
+from ...models.peract_official import create_agent_our
 
 CAMERAS = ["front", "left_shoulder", "right_shoulder", "wrist"]
 SCENE_BOUNDS = [
@@ -17,33 +16,32 @@ SCENE_BOUNDS = [
 IMAGE_SIZE = 128
 VOXEL_SIZES = [100]  # 100x100x100 voxels
 LOW_DIM_SIZE = 4  # {left_finger_joint, right_finger_joint, gripper_open, timestep}
-DATA_FOLDER="/mnt/hdfs/lpy/RLBench/peract_dataset/peract_18tasks/all_variations_128"
-TRAIN_REPLAY_STORAGE_DIR = "/mnt/hdfs/lpy/hugging_face/rvt2_replay_buffer/replay_train_new" # path to save buffer
+DATA_FOLDER = "/mnt/hdfs/lpy/RLBench/peract_dataset/peract_18tasks/all_variations_128"
+TRAIN_REPLAY_STORAGE_DIR = "/mnt/hdfs/lpy/hugging_face/rvt2_replay_buffer/replay_train_new"  # path to save buffer
 EPISODE_FOLDER = "episode%d"
-VARIATION_DESCRIPTIONS_PKL = "variation_descriptions.pkl"  # the pkl file that contains language goals for each demonstration
+VARIATION_DESCRIPTIONS_PKL = (
+    "variation_descriptions.pkl"  # the pkl file that contains language goals for each demonstration
+)
 DEMO_AUGMENTATION_EVERY_N = 10  # sample n-th frame in demo
 ROTATION_RESOLUTION = 5  # degree increments per axis
+
 
 def _norm_rgb(x):
     x = np.asarray(x, dtype=np.float32)
     return (x / 255.0) * 2.0 - 1.0
 
+
 def _preprocess_inputs(replay_sample, cameras):
     obs, pcds = [], []
     for n in cameras:
-    
-       
         rgb = replay_sample[n]["rgb"]
         pcd = replay_sample[n]["pcd"]
 
         rgb = _norm_rgb(rgb)
 
-        obs.append(
-            [rgb, pcd]
-        )  # obs contains both rgb and pointcloud (used in ARM for other baselines)
+        obs.append([rgb, pcd])  # obs contains both rgb and pointcloud (used in ARM for other baselines)
         pcds.append(pcd)  # only pointcloud
     return obs, pcds
-
 
 
 def get_official_peract(
@@ -59,7 +57,7 @@ def get_official_peract(
     :param device: device to build the agent on
     :param bs: batch size, does not matter when we need a model for inference.
     """
-    with open(cfg_path, "r") as f:
+    with open(cfg_path) as f:
         cfg = OmegaConf.load(f)
 
     # we need to modify the batch size as in our case we specify batchsize per

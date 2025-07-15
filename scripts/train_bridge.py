@@ -1,10 +1,10 @@
 import dataclasses
 import functools
 import logging
-import platform
-from typing import Any
 import os
+import platform
 import sys
+from typing import Any
 
 import etils.epath as epath
 import flax.nnx as nnx
@@ -21,14 +21,13 @@ import wandb
 import openpi.models.model as _model
 import openpi.shared.array_typing as at
 import openpi.shared.nnx_utils as nnx_utils
+from openpi.training import bridge_dataloader
 import openpi.training.checkpoints as _checkpoints
 import openpi.training.config as _config
-import openpi.training.data_loader as _data_loader
 import openpi.training.optimizer as _optimizer
 import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
-from openpi.training import bridge_dataloader
 
 
 def init_logging():
@@ -72,11 +71,12 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
     if log_code:
         wandb.run.log_code(epath.Path(__file__).parent.parent)
 
+
 def init_var():
-    '''
+    """
     init distributed training environment.
-    '''
-    pass 
+    """
+
 
 def _load_weights_and_validate(loader: _weight_loaders.WeightLoader, params_shape: at.Params) -> at.Params:
     """Loads and validates the weights. Returns a loaded subset of the weights."""
@@ -224,16 +224,11 @@ def main(config: _config.TrainConfig):
         resume=config.resume,
     )
     init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
-    
+
     train_dataset = bridge_dataloader.Real_Dataset(config.bridge_config)
 
     data_loader_bridge_train, _ = bridge_dataloader.create_bridge_dataloader(
-        dataset=train_dataset,
-        batch_size=4,
-        world_size=None,
-        rank=None,
-        num_workers=0,
-        use_distributed=False
+        dataset=train_dataset, batch_size=4, world_size=None, rank=None, num_workers=0, use_distributed=False
     )
 
     # data_loader = _data_loader.create_data_loader(
@@ -297,16 +292,16 @@ def main(config: _config.TrainConfig):
 
 
 if __name__ == "__main__":
-    
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
 
     # 然后把 sys.argv “伪造” 成你在终端里敲的那条命令
     sys.argv = [
-        sys.argv[0],            # 脚本名
-        "pi0_bridge",       # 第一个位置参数
-        "--exp-name", "my_experiment",
+        sys.argv[0],  # 脚本名
+        "pi0_bridge",  # 第一个位置参数
+        "--exp-name",
+        "my_experiment",
         "--overwrite",
-    ] 
-    
+    ]
+
     main(_config.cli())

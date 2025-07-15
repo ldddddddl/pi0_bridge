@@ -31,9 +31,7 @@ class Args:
     wrist_camera_id: str = "<your_camera_id>"  # 例如 "13062452"
 
     # 策略参数
-    external_camera: str | None = (
-        None  # 应该传递给策略的外部相机，从 ["left", "right"] 中选择
-    )
+    external_camera: str | None = None  # 应该传递给策略的外部相机，从 ["left", "right"] 中选择
 
     # rollout 参数
     max_timesteps: int = 600
@@ -43,9 +41,7 @@ class Args:
 
     # 远程服务器参数
     remote_host: str = "0.0.0.0"  # 指向策略服务器的 IP 地址，例如 "192.168.1.100"
-    remote_port: int = (
-        8000  # 指向策略服务器的端口，openpi 服务器的默认端口为 8000
-    )
+    remote_port: int = 8000  # 指向策略服务器的端口，openpi 服务器的默认端口为 8000
 
 
 # 我们使用 Ctrl+C 可选地提前终止 rollout -- 但如果在策略服务器等待新动作块时按下 Ctrl+C，会抛出异常并导致服务器连接断开。
@@ -71,9 +67,10 @@ def prevent_keyboard_interrupt():
 
 def main(args: Args):
     # 确保用户指定了 external camera -- 策略只用一个外部相机
-    assert (
-        args.external_camera is not None and args.external_camera in ["left", "right"]
-    ), f"请指定用于策略的外部相机，从 ['left', 'right'] 中选择，但得到 {args.external_camera}"
+    assert args.external_camera is not None and args.external_camera in [
+        "left",
+        "right",
+    ], f"请指定用于策略的外部相机，从 ['left', 'right'] 中选择，但得到 {args.external_camera}"
 
     # 初始化 Panda 环境。使用关节速度动作空间和夹爪位置动作空间非常重要。
     env = RobotEnv(action_space="joint_velocity", gripper_action_space="position")
@@ -161,9 +158,7 @@ def main(args: Args):
 
         success: str | float | None = None
         while not isinstance(success, float):
-            success = input(
-                "本次 rollout 是否成功？（输入 y 表示 100%，n 表示 0%，或根据评估标准输入 0-100 的数值）"
-            )
+            success = input("本次 rollout 是否成功？（输入 y 表示 100%，n 表示 0%，或根据评估标准输入 0-100 的数值）")
             if success == "y":
                 success = 1.0
             elif success == "n":

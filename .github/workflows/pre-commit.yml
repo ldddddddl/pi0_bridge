@@ -14,4 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v3
-      - uses: pre-commit/action@v3.0.1
+      # - uses: pre-commit/action@v3.0.1
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1
+        with:
+          # 对所有文件都运行
+          extra_args: ['--all-files']
+          # 跳过会因中文导致失败的那个 hook
+          skip: ['check-commit-msg']

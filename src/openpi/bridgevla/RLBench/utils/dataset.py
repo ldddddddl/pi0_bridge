@@ -1,25 +1,27 @@
 # Copy from https://github.com/robot-colosseum/rvt_colosseum/blob/main/rvt/utils/dataset.py
-import os
-import torch
-import pickle
 import logging
-import numpy as np
-from typing import List
+import os
+import pickle
+import sys
 
 import clip
+import numpy as np
 import peract_colab.arm.utils as utils
-
 from peract_colab.rlbench.utils import get_stored_demo
-from yarr.utils.observation_type import ObservationElement
-from yarr.replay_buffer.replay_buffer import ReplayElement, ReplayBuffer
-from yarr.replay_buffer.uniform_replay_buffer import UniformReplayBuffer
 from rlbench.backend.observation import Observation
 from rlbench.demo import Demo
-import sys 
+import torch
+from yarr.replay_buffer.replay_buffer import ReplayBuffer
+from yarr.replay_buffer.replay_buffer import ReplayElement
+from yarr.replay_buffer.uniform_replay_buffer import UniformReplayBuffer
+from yarr.utils.observation_type import ObservationElement
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "."))
-from peract_utils_rlbench import LOW_DIM_SIZE, IMAGE_SIZE, CAMERAS
 from bridgevla.libs.peract.helpers.demo_loading_utils import keypoint_discovery
 from bridgevla.libs.peract.helpers.utils import extract_obs
+from peract_utils_rlbench import CAMERAS
+from peract_utils_rlbench import IMAGE_SIZE
+from peract_utils_rlbench import LOW_DIM_SIZE
 
 
 def create_replay(
@@ -40,9 +42,7 @@ def create_replay(
 
     # low_dim_state
     observation_elements = []
-    observation_elements.append(
-        ObservationElement("low_dim_state", (LOW_DIM_SIZE,), np.float32)
-    )
+    observation_elements.append(ObservationElement("low_dim_state", (LOW_DIM_SIZE,), np.float32))
 
     # rgb, depth, point cloud, intrinsics, extrinsics
     for cname in cameras:
@@ -104,9 +104,7 @@ def create_replay(
     observation_elements.extend(
         [
             ReplayElement("trans_action_indicies", (trans_indicies_size,), np.int32),
-            ReplayElement(
-                "rot_grip_action_indicies", (rot_and_grip_indicies_size,), np.int32
-            ),
+            ReplayElement("rot_grip_action_indicies", (rot_and_grip_indicies_size,), np.int32),
             ReplayElement("ignore_collisions", (ignore_collisions_size,), np.int32),
             ReplayElement("gripper_pose", (gripper_pose_size,), np.float32),
             ReplayElement(
@@ -117,9 +115,7 @@ def create_replay(
                 ),  # extracted from CLIP's language encoder
                 np.float32,
             ),
-            ReplayElement(
-                "lang_goal", (1,), object
-            ),  # language goal string for debugging and visualization
+            ReplayElement("lang_goal", (1,), object),  # language goal string for debugging and visualization
         ]
     )
 
@@ -132,20 +128,18 @@ def create_replay(
         ReplayElement("sample_frame", (), int),
     ]
 
-    replay_buffer = (
-        UniformReplayBuffer(  # all tuples in the buffer have equal sample weighting
-            disk_saving=disk_saving,
-            batch_size=batch_size,
-            timesteps=timesteps,
-            replay_capacity=int(replay_size),
-            action_shape=(8,),  # 3 translation + 4 rotation quaternion + 1 gripper open
-            action_dtype=np.float32,
-            reward_shape=(),
-            reward_dtype=np.float32,
-            update_horizon=1,
-            observation_elements=observation_elements,
-            extra_replay_elements=extra_replay_elements,
-        )
+    replay_buffer = UniformReplayBuffer(  # all tuples in the buffer have equal sample weighting
+        disk_saving=disk_saving,
+        batch_size=batch_size,
+        timesteps=timesteps,
+        replay_capacity=int(replay_size),
+        action_shape=(8,),  # 3 translation + 4 rotation quaternion + 1 gripper open
+        action_dtype=np.float32,
+        reward_shape=(),
+        reward_dtype=np.float32,
+        update_horizon=1,
+        observation_elements=observation_elements,
+        extra_replay_elements=extra_replay_elements,
     )
     return replay_buffer
 
@@ -154,8 +148,8 @@ def create_replay(
 def _get_action(
     obs_tp1: Observation,
     obs_tm1: Observation,
-    rlbench_scene_bounds: List[float],  # metric 3D bounds of the scene
-    voxel_sizes: List[int],
+    rlbench_scene_bounds: list[float],  # metric 3D bounds of the scene
+    voxel_sizes: list[int],
     rotation_resolution: int,
     crop_augmentation: bool,
 ):
@@ -167,9 +161,7 @@ def _get_action(
     trans_indicies, attention_coordinates = [], []
     bounds = np.array(rlbench_scene_bounds)
     ignore_collisions = int(obs_tm1.ignore_collisions)
-    for depth, vox_size in enumerate(
-        voxel_sizes
-    ):  # only single voxelization-level is used in PerAct
+    for depth, vox_size in enumerate(voxel_sizes):  # only single voxelization-level is used in PerAct
         index = utils.point_to_voxel_index(obs_tp1.gripper_pose[:3], vox_size, bounds)
         trans_indicies.extend(index.tolist())
         res = (bounds[3:] - bounds[:3]) / vox_size
@@ -190,9 +182,7 @@ def _get_action(
 
 # extract CLIP language features for goal string
 def _clip_encode_text(clip_model, text):
-    x = clip_model.token_embedding(text).type(
-        clip_model.dtype
-    )  # [batch_size, n_ctx, d_model]
+    x = clip_model.token_embedding(text).type(clip_model.dtype)  # [batch_size, n_ctx, d_model]
 
     x = x + clip_model.positional_embedding.type(clip_model.dtype)
     x = x.permute(1, 0, 2)  # NLD -> LND
@@ -215,10 +205,10 @@ def _add_keypoints_to_replay(
     sample_frame: int,
     inital_obs: Observation,
     demo: Demo,
-    episode_keypoints: List[int],
-    cameras: List[str],
-    rlbench_scene_bounds: List[float],
-    voxel_sizes: List[int],
+    episode_keypoints: list[int],
+    cameras: list[str],
+    rlbench_scene_bounds: list[float],
+    voxel_sizes: list[int],
     rotation_resolution: int,
     crop_augmentation: bool,
     next_keypoint_idx: int,
@@ -260,7 +250,7 @@ def _add_keypoints_to_replay(
             episode_length=25,
         )
         # Note: we add the following line to correct the ignore_collisions issue. When we use the original file to generate buffer, we find the model always fails on the collision prediction.
-        obs_dict["ignore_collisions"] = np.array([ignore_collisions]) 
+        obs_dict["ignore_collisions"] = np.array([ignore_collisions])
         tokens = clip.tokenize([description]).numpy()
         token_tensor = torch.from_numpy(tokens).to(device)
         with torch.no_grad():
@@ -292,15 +282,7 @@ def _add_keypoints_to_replay(
         others.update(obs_dict)
 
         timeout = False
-        replay.add(
-            task,
-            task_replay_storage_folder,
-            action,
-            reward,
-            terminal,
-            timeout,
-            **others
-        )
+        replay.add(task, task_replay_storage_folder, action, reward, terminal, timeout, **others)
         obs = obs_tp1
         sample_frame = keypoint
 
@@ -327,9 +309,9 @@ def fill_replay(
     num_demos: int,
     demo_augmentation: bool,
     demo_augmentation_every_n: int,
-    cameras: List[str],
-    rlbench_scene_bounds: List[float],  # AKA: DEPTH0_BOUNDS
-    voxel_sizes: List[int],
+    cameras: list[str],
+    rlbench_scene_bounds: list[float],  # AKA: DEPTH0_BOUNDS
+    voxel_sizes: list[int],
     rotation_resolution: int,
     crop_augmentation: bool,
     data_path: str,
@@ -338,14 +320,11 @@ def fill_replay(
     clip_model=None,
     device="cpu",
 ):
-
     disk_exist = False
     if replay._disk_saving:
         if os.path.exists(task_replay_storage_folder):
             print(
-                "[Info] Replay dataset already exists in the disk: {}".format(
-                    task_replay_storage_folder
-                ),
+                f"[Info] Replay dataset already exists in the disk: {task_replay_storage_folder}",
                 flush=True,
             )
             disk_exist = True
@@ -363,9 +342,7 @@ def fill_replay(
 
             # get language goal from disk
 
-            varation_descs_pkl_file = os.path.join(
-                data_path, episode_folder % d_idx, variation_desriptions_pkl
-            )
+            varation_descs_pkl_file = os.path.join(data_path, episode_folder % d_idx, variation_desriptions_pkl)
             with open(varation_descs_pkl_file, "rb") as f:
                 descs = pickle.load(f)
 
@@ -381,10 +358,7 @@ def fill_replay(
                 obs = demo[i]
                 desc = descs[0]
                 # if our starting point is past one of the keypoints, then remove it
-                while (
-                    next_keypoint_idx < len(episode_keypoints)
-                    and i >= episode_keypoints[next_keypoint_idx]
-                ):
+                while next_keypoint_idx < len(episode_keypoints) and i >= episode_keypoints[next_keypoint_idx]:
                     next_keypoint_idx += 1
                 if next_keypoint_idx == len(episode_keypoints):
                     break
@@ -410,15 +384,11 @@ def fill_replay(
 
         # save TERMINAL info in replay_info.npy
         task_idx = replay._task_index[task]
-        with open(
-            os.path.join(task_replay_storage_folder, "replay_info.npy"), "wb"
-        ) as fp:
+        with open(os.path.join(task_replay_storage_folder, "replay_info.npy"), "wb") as fp:
             np.save(
                 fp,
                 replay._store["terminal"][
-                    replay._task_replay_start_index[
-                        task_idx
-                    ] : replay._task_replay_start_index[task_idx]
+                    replay._task_replay_start_index[task_idx] : replay._task_replay_start_index[task_idx]
                     + replay._task_add_count[task_idx].value
                 ],
             )

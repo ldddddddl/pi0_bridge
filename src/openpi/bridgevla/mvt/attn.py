@@ -1,17 +1,17 @@
 # Copy from https://github.com/NVlabs/RVT/blob/master/rvt/mvt/attn.py
-import math
-from math import log
 from functools import wraps
+import math
 
+from einops import rearrange
+from einops import repeat
 import torch
+from torch import einsum
+from torch import nn
 import torch.nn.functional as F
-
-from torch import nn, einsum
-from einops import rearrange, repeat
 
 try:
     import xformers.ops as xops
-except ImportError as e:
+except ImportError:
     xops = None
 
 LRELU_SLOPE = 0.02
@@ -68,18 +68,14 @@ class GEGLU(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self, dim, mult=4):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim, dim * mult * 2), GEGLU(), nn.Linear(dim * mult, dim)
-        )
+        self.net = nn.Sequential(nn.Linear(dim, dim * mult * 2), GEGLU(), nn.Linear(dim * mult, dim))
 
     def forward(self, x):
         return self.net(x)
 
 
 class Attention(nn.Module):  # is all you need. Living up to its name.
-    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64,
-                 dropout=0.0, use_fast=False):
-
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0, use_fast=False):
         super().__init__()
         self.use_fast = use_fast
         inner_dim = dim_head * heads
@@ -97,7 +93,7 @@ class Attention(nn.Module):  # is all you need. Living up to its name.
 
         self.avail_xf = False
         if self.use_fast:
-            if not xops is None:
+            if xops is not None:
                 self.avail_xf = True
             else:
                 self.use_fast = False
@@ -115,9 +111,7 @@ class Attention(nn.Module):  # is all you need. Living up to its name.
             dropout_p = self.dropout_p if self.training else 0.0
             # using xf if available
             if self.avail_xf:
-                out = xops.memory_efficient_attention(
-                    query=q, key=k, value=v, p=dropout_p
-                )
+                out = xops.memory_efficient_attention(query=q, key=k, value=v, p=dropout_p)
         else:
             sim = einsum("b i d, b j d -> b i j", q, k) * self.scale
             if exists(mask):
@@ -139,42 +133,39 @@ class Attention(nn.Module):  # is all you need. Living up to its name.
 def act_layer(act):
     if act == "relu":
         return nn.ReLU()
-    elif act == "lrelu":
+    if act == "lrelu":
         return nn.LeakyReLU(LRELU_SLOPE)
-    elif act == "elu":
+    if act == "elu":
         return nn.ELU()
-    elif act == "tanh":
+    if act == "tanh":
         return nn.Tanh()
-    elif act == "prelu":
+    if act == "prelu":
         return nn.PReLU()
-    else:
-        raise ValueError("%s not recognized." % act)
+    raise ValueError("%s not recognized." % act)
 
 
 def norm_layer2d(norm, channels):
     if norm == "batch":
         return nn.BatchNorm2d(channels)
-    elif norm == "instance":
+    if norm == "instance":
         return nn.InstanceNorm2d(channels, affine=True)
-    elif norm == "layer":
+    if norm == "layer":
         return nn.GroupNorm(1, channels, affine=True)
-    elif norm == "group":
+    if norm == "group":
         return nn.GroupNorm(4, channels, affine=True)
-    else:
-        raise ValueError("%s not recognized." % norm)
+    raise ValueError("%s not recognized." % norm)
 
 
 def norm_layer1d(norm, num_channels):
     if norm == "batch":
         return nn.BatchNorm1d(num_channels)
-    elif norm == "instance":
+    if norm == "instance":
         return nn.InstanceNorm1d(num_channels, affine=True)
-    elif norm == "layer":
+    if norm == "layer":
         return nn.LayerNorm(num_channels)
-    elif norm == "group":
+    if norm == "group":
         return nn.GroupNorm(4, num_channels, affine=True)
-    else:
-        raise ValueError("%s not recognized." % norm)
+    raise ValueError("%s not recognized." % norm)
 
 
 class Conv2DBlock(nn.Module):
@@ -201,19 +192,13 @@ class Conv2DBlock(nn.Module):
         )
 
         if activation is None:
-            nn.init.xavier_uniform_(
-                self.conv2d.weight, gain=nn.init.calculate_gain("linear")
-            )
+            nn.init.xavier_uniform_(self.conv2d.weight, gain=nn.init.calculate_gain("linear"))
             nn.init.zeros_(self.conv2d.bias)
         elif activation == "tanh":
-            nn.init.xavier_uniform_(
-                self.conv2d.weight, gain=nn.init.calculate_gain("tanh")
-            )
+            nn.init.xavier_uniform_(self.conv2d.weight, gain=nn.init.calculate_gain("tanh"))
             nn.init.zeros_(self.conv2d.bias)
         elif activation == "lrelu":
-            nn.init.kaiming_uniform_(
-                self.conv2d.weight, a=LRELU_SLOPE, nonlinearity="leaky_relu"
-            )
+            nn.init.kaiming_uniform_(self.conv2d.weight, a=LRELU_SLOPE, nonlinearity="leaky_relu")
             nn.init.zeros_(self.conv2d.bias)
         elif activation == "relu":
             nn.init.kaiming_uniform_(self.conv2d.weight, nonlinearity="relu")
@@ -249,26 +234,18 @@ class Conv2DUpsampleBlock(nn.Module):
         out_size=None,
     ):
         super().__init__()
-        layer = [
-            Conv2DBlock(in_channels, out_channels, kernel_sizes, 1, norm, activation)
-        ]
+        layer = [Conv2DBlock(in_channels, out_channels, kernel_sizes, 1, norm, activation)]
         if strides > 1:
             if out_size is None:
-                layer.append(
-                    nn.Upsample(scale_factor=strides, mode="bilinear", align_corners=False)
-                )
+                layer.append(nn.Upsample(scale_factor=strides, mode="bilinear", align_corners=False))
             else:
-                layer.append(
-                    nn.Upsample(size=out_size, mode="bilinear", align_corners=False)
-                )
+                layer.append(nn.Upsample(size=out_size, mode="bilinear", align_corners=False))
 
         if out_size is not None:
             if kernel_sizes % 2 == 0:
                 kernel_sizes += 1
 
-        convt_block = Conv2DBlock(
-            out_channels, out_channels, kernel_sizes, 1, norm, activation
-        )
+        convt_block = Conv2DBlock(out_channels, out_channels, kernel_sizes, 1, norm, activation)
         layer.append(convt_block)
         self.conv_up = nn.Sequential(*layer)
 
@@ -282,19 +259,13 @@ class DenseBlock(nn.Module):
         self.linear = nn.Linear(in_features, out_features)
 
         if activation is None:
-            nn.init.xavier_uniform_(
-                self.linear.weight, gain=nn.init.calculate_gain("linear")
-            )
+            nn.init.xavier_uniform_(self.linear.weight, gain=nn.init.calculate_gain("linear"))
             nn.init.zeros_(self.linear.bias)
         elif activation == "tanh":
-            nn.init.xavier_uniform_(
-                self.linear.weight, gain=nn.init.calculate_gain("tanh")
-            )
+            nn.init.xavier_uniform_(self.linear.weight, gain=nn.init.calculate_gain("tanh"))
             nn.init.zeros_(self.linear.bias)
         elif activation == "lrelu":
-            nn.init.kaiming_uniform_(
-                self.linear.weight, a=LRELU_SLOPE, nonlinearity="leaky_relu"
-            )
+            nn.init.kaiming_uniform_(self.linear.weight, a=LRELU_SLOPE, nonlinearity="leaky_relu")
             nn.init.zeros_(self.linear.bias)
         elif activation == "relu":
             nn.init.kaiming_uniform_(self.linear.weight, nonlinearity="relu")
@@ -322,10 +293,7 @@ class FixedPositionalEncoding(nn.Module):
         super().__init__()
         self.feat_scale_factor = feat_scale_factor
         # shape [1, feat_per_dim // 2]
-        div_term = torch.exp(
-            torch.arange(0, feat_per_dim, 2) * (-math.log(10000.0) /
-                                                feat_per_dim)
-        ).unsqueeze(0)
+        div_term = torch.exp(torch.arange(0, feat_per_dim, 2) * (-math.log(10000.0) / feat_per_dim)).unsqueeze(0)
         self.register_buffer("div_term", div_term)
 
     def forward(self, x):
@@ -336,8 +304,12 @@ class FixedPositionalEncoding(nn.Module):
         assert len(x.shape) == 2
         batch_size, input_dim = x.shape
         x = x.view(-1, 1)
-        x = torch.cat((
-            torch.sin(self.feat_scale_factor * x * self.div_term),
-            torch.cos(self.feat_scale_factor * x * self.div_term)), dim=1)
+        x = torch.cat(
+            (
+                torch.sin(self.feat_scale_factor * x * self.div_term),
+                torch.cos(self.feat_scale_factor * x * self.div_term),
+            ),
+            dim=1,
+        )
         x = x.view(batch_size, -1)
         return x

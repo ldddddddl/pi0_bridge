@@ -1,4 +1,4 @@
-'''
+"""
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -15,60 +15,50 @@ Therefore, the code is also under the NVIDIA Source Code License
 
 Author: Peiyan Li
 Email: peiyan.li@cripac.ia.ac.cn
-'''
-import os
-import yaml
-import csv
-import torch
-import cv2
-import shutil
-import numpy as np
-from multiprocessing import Value
+"""
+
 from copy import deepcopy
+import csv
+from multiprocessing import Value
+import os
+import shutil
+
+import cv2
+import numpy as np
+import torch
+import yaml
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["BITSANDBYTES_NOWELCOME"] = "1"
 
+import os
+
+import bridgevla.config as default_exp_cfg
+from bridgevla.libs.peract.helpers import utils
+import bridgevla.models.bridgevla_agent as bridgevla_agent
+import bridgevla.mvt.config as default_mvt_cfg
+from bridgevla.mvt.mvt import MVT
+from bridgevla.utils.rvt_utils import RLBENCH_TASKS
+from bridgevla.utils.rvt_utils import TensorboardManager
+from bridgevla.utils.rvt_utils import get_eval_parser
+from bridgevla.utils.rvt_utils import load_agent as load_agent_state
+from rlbench.action_modes.action_mode import MoveArmThenGripper
+from rlbench.action_modes.gripper_action_modes import Discrete
 from rlbench.backend import task as rlbench_task
 from rlbench.backend.utils import task_file_to_task_class
-from rlbench.action_modes.gripper_action_modes import Discrete
-from rlbench.action_modes.action_mode import MoveArmThenGripper
+from utils.custom_rlbench_env import CustomMultiTaskRLBenchEnv2 as CustomMultiTaskRLBenchEnv
+from utils.peract_utils_rlbench import CAMERAS
+from utils.peract_utils_rlbench import IMAGE_SIZE
+from utils.peract_utils_rlbench import SCENE_BOUNDS
+from utils.rlbench_planning import EndEffectorPoseViaPlanning2 as EndEffectorPoseViaPlanning
+from yarr.agents.agent import VideoSummary
 from yarr.utils.rollout_generator import RolloutGenerator
 from yarr.utils.stat_accumulator import SimpleAccumulator
-from yarr.agents.agent import VideoSummary
 
-import bridgevla.mvt.config as default_mvt_cfg
-import bridgevla.models.bridgevla_agent as bridgevla_agent
-import bridgevla.config as default_exp_cfg
-
-from bridgevla.mvt.mvt import MVT
-from bridgevla.libs.peract.helpers import utils
-from utils.custom_rlbench_env import (
-    CustomMultiTaskRLBenchEnv2 as CustomMultiTaskRLBenchEnv,
-)
-from utils.peract_utils_rlbench import (
-    CAMERAS,
-    SCENE_BOUNDS,
-    IMAGE_SIZE,
-)
-from utils.rlbench_planning import (
-    EndEffectorPoseViaPlanning2 as EndEffectorPoseViaPlanning,
-)
-from bridgevla.utils.rvt_utils import (
-    TensorboardManager,
-    get_eval_parser,
-    RLBENCH_TASKS,
-)
-from bridgevla.utils.rvt_utils import load_agent as load_agent_state
-import os 
 
 def load_agent(
-    model_path=None,
-    exp_cfg_path=None,
-    mvt_cfg_path=None,
-    eval_log_dir="",
-    device=0,
-    use_input_place_with_mean=False):
+    model_path=None, exp_cfg_path=None, mvt_cfg_path=None, eval_log_dir="", device=0, use_input_place_with_mean=False
+):
     device = f"cuda:{device}"
     assert model_path is not None
 
@@ -89,7 +79,6 @@ def load_agent(
         exp_cfg.rvt.place_with_mean = True
 
     exp_cfg.freeze()
-
 
     mvt_cfg = default_mvt_cfg.get_cfg_defaults()
     if mvt_cfg_path != None:
@@ -121,7 +110,6 @@ def load_agent(
         **exp_cfg.rvt,
     )
 
-
     agent.build(training=False, device=device)
     load_agent_state(model_path, agent)
     agent.eval()
@@ -129,8 +117,6 @@ def load_agent(
     print("Agent Information")
     print(agent)
     return agent
-
-
 
 
 @torch.no_grad()
@@ -162,9 +148,7 @@ def eval(
     action_mode = MoveArmThenGripper(arm_action_mode, gripper_mode)
 
     task_files = [
-        t.replace(".py", "")
-        for t in os.listdir(rlbench_task.TASKS_PATH)
-        if t != "__init__.py" and t.endswith(".py")
+        t.replace(".py", "") for t in os.listdir(rlbench_task.TASKS_PATH) if t != "__init__.py" and t.endswith(".py")
     ]
 
     task_classes = []
@@ -220,7 +204,7 @@ def eval(
     scores = []
     for task_id in range(num_tasks):
         task_rewards = []
-        language_goals=[]
+        language_goals = []
         for ep in range(start_episode, start_episode + eval_episodes):
             episode_rollout = []
             if not visualize:
@@ -238,7 +222,7 @@ def eval(
             else:
                 task_name = tasks[task_id]
                 lang_goal = eval_env._lang_goal
-                visualize_save_dir=os.path.join(visualize_root_dir,task_name,f"episode_{ep}")
+                visualize_save_dir = os.path.join(visualize_root_dir, task_name, f"episode_{ep}")
                 if not os.path.exists(visualize_save_dir):
                     os.makedirs(visualize_save_dir)
                 generator = rollout_generator.generator_visualize(
@@ -256,8 +240,8 @@ def eval(
             try:
                 for replay_transition in generator:
                     episode_rollout.append(replay_transition)
-                    
-            except StopIteration as e:
+
+            except StopIteration:
                 continue
             except Exception as e:
                 eval_env.shutdown()
@@ -304,9 +288,7 @@ def eval(
                     s.name = "%s/%s" % (s.name, task_name)
 
         if len(summaries) > 0:
-            task_score = [
-                s.value for s in summaries if f"eval_envs/return/{task_name}" in s.name
-            ][0]
+            task_score = [s.value for s in summaries if f"eval_envs/return/{task_name}" in s.name][0]
         else:
             task_score = "unknown"
 
@@ -317,13 +299,13 @@ def eval(
         if save_video:
             video_image_folder = f"./tmp/{model_name}/{task_name}"
             palette_image_folder = f"./tmp/{model_name}/palette_folder"
-            palette_image_path=os.path.join(palette_image_folder,"palette.png")
+            palette_image_path = os.path.join(palette_image_folder, "palette.png")
 
             record_fps = 25
             if not visualize:
                 record_folder = os.path.join(log_dir, "videos")
             else:
-                record_folder = os.path.join(visualize_root_dir,task_name,"videos")
+                record_folder = os.path.join(visualize_root_dir, task_name, "videos")
             os.makedirs(record_folder, exist_ok=True)
             video_success_cnt = 0
             video_fail_cnt = 0
@@ -331,7 +313,7 @@ def eval(
             for summary in summaries:
                 if isinstance(summary, VideoSummary):
                     lang_goal = language_goals.pop(0)
-                    lang_goal=lang_goal.replace(" ", "_")
+                    lang_goal = lang_goal.replace(" ", "_")
                     video = deepcopy(summary.value)
                     video = np.transpose(video, (0, 2, 3, 1))
                     video = video[:, :, :, ::-1]
@@ -342,30 +324,22 @@ def eval(
                         )
                         video_success_cnt += 1
                     else:
-                        video_path = os.path.join(
-                            record_folder, f"{lang_goal}_fail_{video_fail_cnt}.mp4"
-                        )
+                        video_path = os.path.join(record_folder, f"{lang_goal}_fail_{video_fail_cnt}.mp4")
                         video_fail_cnt += 1
                     video_cnt += 1
                     os.makedirs(video_image_folder, exist_ok=True)
                     os.makedirs(palette_image_folder, exist_ok=True)
                     for idx in range(len(video) - 10):
-                        cv2.imwrite(
-                            os.path.join(video_image_folder, f"{idx}.png"), video[idx]
-                        )
+                        cv2.imwrite(os.path.join(video_image_folder, f"{idx}.png"), video[idx])
                     images_path = os.path.join(video_image_folder, r"%d.png")
                     os.system(
-                        "ffmpeg -i {} -vf palettegen {} -hide_banner -loglevel error".format(
-                            images_path, palette_image_path
-                        )
+                        f"ffmpeg -i {images_path} -vf palettegen {palette_image_path} -hide_banner -loglevel error"
                     )
-                    
+
                     os.system(
-                        "ffmpeg -framerate {} -i {} -i {} -lavfi paletteuse {} -hide_banner -loglevel error".format(
-                            record_fps, images_path, palette_image_path, video_path
-                        )
+                        f"ffmpeg -framerate {record_fps} -i {images_path} -i {palette_image_path} -lavfi paletteuse {video_path} -hide_banner -loglevel error"
                     )
-                    print(f'video saved - {task_name}')
+                    print(f"video saved - {task_name}")
                     os.remove(palette_image_path)
                     shutil.rmtree(video_image_folder)
 
@@ -373,7 +347,6 @@ def eval(
 
     if logging:
         csv_fp.close()
-
 
     return scores
 
@@ -394,7 +367,6 @@ def get_model_index(filename):
 
 
 def _eval(args):
-
     model_paths = []
     assert args.model_name is not None
     model_paths.append(os.path.join(args.model_folder, args.model_name))
@@ -405,7 +377,6 @@ def _eval(args):
         if model_idx is None:
             model_idx = 0
 
-  
         agent = load_agent(
             model_path=model_path,
             exp_cfg_path=args.exp_cfg_path,
@@ -415,10 +386,7 @@ def _eval(args):
             use_input_place_with_mean=args.use_input_place_with_mean,
         )
 
-        agent_eval_log_dir = os.path.join(
-            args.eval_log_dir, os.path.basename(model_path).split(".")[0]
-        )
-
+        agent_eval_log_dir = os.path.join(args.eval_log_dir, os.path.basename(model_path).split(".")[0])
 
         os.makedirs(agent_eval_log_dir, exist_ok=True)
         scores = eval(

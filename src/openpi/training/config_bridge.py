@@ -89,7 +89,6 @@ class DataConfig:
     # DROID 数据集的动作空间。
     action_space: droid_rlds_dataset.DroidActionSpace | None = None
 
-    
 
 class GroupFactory(Protocol):
     def __call__(self, model_config: _model.BaseModelConfig) -> _transforms.Group:
@@ -411,7 +410,7 @@ class TrainConfig:
     num_workers: int = 2
     # 要运行的训练步数（批次）。
     num_train_steps: int = 30_000
-    
+
     device_id: int = 0
 
     # 记录训练指标的频率（以步为单位）。
@@ -437,10 +436,8 @@ class TrainConfig:
     # 例如，如果总设备是 4 且 fsdp 设备是 2；那么模型将分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
     fsdp_devices: int = 1
-    
-    bridge_config: Any = field(init=False)
 
-    
+    bridge_config: Any = field(init=False)
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -459,17 +456,16 @@ class TrainConfig:
         """获取可训练参数的过滤器。"""
         return nnx.All(nnx.Param, nnx.Not(self.freeze_filter))
 
-
     def __post_init__(self) -> None:
-        object.__setattr__(self, 'bridge_config', self._init_bridge_config())
+        object.__setattr__(self, "bridge_config", self._init_bridge_config())
         if self.resume and self.overwrite:
             raise ValueError("不能同时恢复和覆盖。")
-        
+
     def _init_bridge_config(self):
-        
         import argparse
+
         parser = argparse.ArgumentParser()
-        
+
         parser.set_defaults(entry=lambda cmd_args: parser.print_help())
 
         parser.add_argument("--refresh_replay", action="store_true", default=False)
@@ -481,19 +477,21 @@ class TrainConfig:
         parser.add_argument("--exp_note", type=str, default="")
 
         parser.add_argument("--log-dir", type=str, default="/home/wzh/BridgeVLA/finetune/Real/logs")
-        parser.add_argument("--data_folder", type=str, default="/home/wzh/BridgeVLA/finetune/Real/data/0616_open_the_door")
+        parser.add_argument(
+            "--data_folder", type=str, default="/home/wzh/BridgeVLA/finetune/Real/data/0616_open_the_door"
+        )
         parser.add_argument("--test_data_folder", type=str, default=None, help="Path to test dataset folder")
         parser.add_argument("--eval_interval", type=int, default=5, help="Interval between evaluations in epochs")
-        
+
         parser.add_argument("--with-eval", action="store_true", default=False)
         parser.add_argument("--debug", action="store_true")
         parser.add_argument("--palligemma_type", type=int, default=1)
         parser.add_argument("--layer_index", type=int, default=-1)
         parser.add_argument("--ep_per_task", type=int, default=5)
-        parser.add_argument("--layer_concat", action="store_true",default=False)
+        parser.add_argument("--layer_concat", action="store_true", default=False)
         parser.add_argument("--colossum", action="store_true")
         parser.add_argument("--few_shot", action="store_true")
-        
+
         parser.add_argument("--freeze_language_model", action="store_true")
         parser.add_argument("--freeze_vision_tower", action="store_true")
         parser.add_argument("--load_pretrain", action="store_true")
@@ -507,23 +505,26 @@ class TrainConfig:
             type=str,  # 每个值的类型
             nargs="+",  # 接受一个或多个值
             default=["3rd"],  # 默认值
-            help="List of camera names"
+            help="List of camera names",
         )
-        parser.add_argument("--update_dpo", action="store_true",default=False, help="使用DPO训练模式")
+        parser.add_argument("--update_dpo", action="store_true", default=False, help="使用DPO训练模式")
         parser.add_argument("--dpo_beta", type=float, default=0.1, help="DPO温度参数beta")
-        parser.add_argument("--device", type=str, default='cuda:0', help="which device will used")
-        parser.add_argument("--data_path", type=str, default='/home/ldl/vla/openpi/datasets/20250627', help="dobot_formate_dual_arm_open_door_0627")
-        parser.add_argument("--exp_id", type=str, default='rvt2_vlm', help="")
+        parser.add_argument("--device", type=str, default="cuda:0", help="which device will used")
+        parser.add_argument(
+            "--data_path",
+            type=str,
+            default="/home/ldl/vla/openpi/datasets/20250627",
+            help="dobot_formate_dual_arm_open_door_0627",
+        )
+        parser.add_argument("--exp_id", type=str, default="rvt2_vlm", help="")
         parser.add_argument("--bs", type=int, default=4, help="")
         parser.add_argument("--num_workers", type=int, default=4, help="")
         parser.add_argument("--epochs", type=int, default=300, help="")
         parser.add_argument("--train_iter", type=int, default=16000, help="")
-        
-        
-        
+
         # parser.add_argument("--reference_model_path", type=str, default=None, help="参考模型路径，用于DPO训练")
         cmd_args = parser.parse_args(args=[])
-        
+
         return cmd_args
 
 
@@ -560,7 +561,6 @@ _CONFIGS = [
     #
     TrainConfig(
         name="pi0_droid",
-
         model=pi0.Pi0Config(action_horizon=10),
         data=SimpleDataConfig(
             assets=AssetsConfig(asset_id="droid"),
@@ -571,7 +571,6 @@ _CONFIGS = [
             base_config=DataConfig(
                 prompt_from_task=True,
                 repo_id="lerobot/droid_100",
-                
             ),
         ),
     ),
@@ -620,8 +619,6 @@ _CONFIGS = [
         # 查看基础 TrainConfig 类以获取可用超参数的完整列表。
         num_train_steps=30_000,
     ),
-
-    
     TrainConfig(
         name="pi0_libero_low_mem_finetune",
         # 这是加载 pi0 模型进行 LoRA 微调的示例。
@@ -784,7 +781,6 @@ _CONFIGS = [
         num_train_steps=10,
         wandb_enabled=False,
     ),
-        
     #
     # 微调 Bridge 配置。
     #
@@ -819,7 +815,6 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=20_000,
     ),
-    
 ]
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):

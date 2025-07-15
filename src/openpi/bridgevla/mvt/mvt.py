@@ -1,4 +1,4 @@
-'''
+"""
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -15,16 +15,19 @@ Therefore, the code is also under the NVIDIA Source Code License
 
 Author: Peiyan Li
 Email: peiyan.li@cripac.ia.ac.cn
-'''
+"""
+
 import copy
-import torch
+import os
+
+from bridgevla.mvt.config import get_cfg_defaults
+from bridgevla.mvt.mvt_single import MVT as MVTSingle
+import bridgevla.mvt.utils as mvt_utils
 import matplotlib.pyplot as plt
 import numpy as np
-import os
+import torch
 from torch import nn
-import bridgevla.mvt.utils as mvt_utils
-from bridgevla.mvt.mvt_single import MVT as MVTSingle
-from bridgevla.mvt.config import get_cfg_defaults
+
 
 class MVT(nn.Module):
     def __init__(
@@ -107,8 +110,6 @@ class MVT(nn.Module):
             # output_arm_flag=self.output_arm_flag
         )  # we have merged mvt1 and mvt2
 
-
-
     def get_pt_loc_on_img(self, pt, mvt1_or_mvt2, dyn_cam_info, out=None):
         """
         :param pt: point for which location on image is to be found. the point
@@ -129,14 +130,12 @@ class MVT(nn.Module):
         else:
             assert self.stage_two
             assert out is not None
-            assert out['wpt_local1'].shape == (bs, 3)
+            assert out["wpt_local1"].shape == (bs, 3)
             pt, _ = mvt_utils.trans_pc(pt, loc=out["wpt_local1"], sca=self.st_sca)
             pt = pt.view(bs, _np, 3)
             out = self.mvt1.get_pt_loc_on_img(pt, dyn_cam_info)
 
         return out
-
-
 
     def get_wpt(self, out, mvt1_or_mvt2, dyn_cam_info, y_q=None):
         """
@@ -147,18 +146,16 @@ class MVT(nn.Module):
         assert isinstance(mvt1_or_mvt2, bool)
         if mvt1_or_mvt2:
             wpt = self.mvt1.get_wpt(
-                out, dyn_cam_info, y_q,
+                out,
+                dyn_cam_info,
+                y_q,
             )
         else:
             assert self.stage_two
-            wpt = self.mvt1.get_wpt(
-                out["mvt2"], dyn_cam_info, y_q
-            )
+            wpt = self.mvt1.get_wpt(out["mvt2"], dyn_cam_info, y_q)
             wpt = out["rev_trans"](wpt)
 
         return wpt
-
-
 
     def render(self, pc, img_feat, img_aug, mvt1_or_mvt2, dyn_cam_info):
         assert isinstance(mvt1_or_mvt2, bool)
@@ -167,61 +164,49 @@ class MVT(nn.Module):
 
         with torch.no_grad():
             # with autocast(enabled=False):
-                if dyn_cam_info is None:
-                    dyn_cam_info_itr = (None,) * len(pc)
-                else:
-                    dyn_cam_info_itr = dyn_cam_info
+            if dyn_cam_info is None:
+                dyn_cam_info_itr = (None,) * len(pc)
+            else:
+                dyn_cam_info_itr = dyn_cam_info
 
-                if mvt.add_corr:
-                    if mvt.norm_corr:
-                        img = []
-                        for _pc, _img_feat, _dyn_cam_info in zip(
-                            pc, img_feat, dyn_cam_info_itr
-                        ):
-                            # fix when the pc is empty
-                            max_pc = 1.0 if len(_pc) == 0 else torch.max(torch.abs(_pc))
-                           
-                            img.append(
-                                self.renderer(
-                                    _pc,
-                                    torch.cat((_pc / max_pc, _img_feat), dim=-1),
-                                    fix_cam=True,
-                                    dyn_cam_info=(_dyn_cam_info,)
-                                    if not (_dyn_cam_info is None)
-                                    else None,
-                                ).unsqueeze(0)
-                            )
-                    else:
-                        img = [
+            if mvt.add_corr:
+                if mvt.norm_corr:
+                    img = []
+                    for _pc, _img_feat, _dyn_cam_info in zip(pc, img_feat, dyn_cam_info_itr):
+                        # fix when the pc is empty
+                        max_pc = 1.0 if len(_pc) == 0 else torch.max(torch.abs(_pc))
+
+                        img.append(
                             self.renderer(
                                 _pc,
-                                torch.cat((_pc, _img_feat), dim=-1),
+                                torch.cat((_pc / max_pc, _img_feat), dim=-1),
                                 fix_cam=True,
-                                dyn_cam_info=(_dyn_cam_info,)
-                                if not (_dyn_cam_info is None)
-                                else None,
+                                dyn_cam_info=(_dyn_cam_info,) if _dyn_cam_info is not None else None,
                             ).unsqueeze(0)
-                            for (_pc, _img_feat, _dyn_cam_info) in zip(
-                                pc, img_feat, dyn_cam_info_itr
-                            )
-                        ]
+                        )
                 else:
                     img = [
                         self.renderer(
                             _pc,
-                            _img_feat,
+                            torch.cat((_pc, _img_feat), dim=-1),
                             fix_cam=True,
-                            dyn_cam_info=(_dyn_cam_info,)
-                            if not (_dyn_cam_info is None)
-                            else None,
+                            dyn_cam_info=(_dyn_cam_info,) if _dyn_cam_info is not None else None,
                         ).unsqueeze(0)
-                        for (_pc, _img_feat, _dyn_cam_info) in zip(
-                            pc, img_feat, dyn_cam_info_itr
-                        )
+                        for (_pc, _img_feat, _dyn_cam_info) in zip(pc, img_feat, dyn_cam_info_itr)
                     ]
+            else:
+                img = [
+                    self.renderer(
+                        _pc,
+                        _img_feat,
+                        fix_cam=True,
+                        dyn_cam_info=(_dyn_cam_info,) if _dyn_cam_info is not None else None,
+                    ).unsqueeze(0)
+                    for (_pc, _img_feat, _dyn_cam_info) in zip(pc, img_feat, dyn_cam_info_itr)
+                ]
 
         img = torch.cat(img, 0)
-        
+
         img = img.permute(0, 1, 4, 2, 3)
 
         # for visualization purposes
@@ -240,12 +225,9 @@ class MVT(nn.Module):
         if mvt.add_pixel_loc:
             bs = img.shape[0]
             pixel_loc = mvt.pixel_loc.to(img.device)
-            img = torch.cat(
-                (img, pixel_loc.unsqueeze(0).repeat(bs, 1, 1, 1, 1)), dim=2
-            )
+            img = torch.cat((img, pixel_loc.unsqueeze(0).repeat(bs, 1, 1, 1, 1)), dim=2)
 
         return img
-
 
     def verify_inp(
         self,
@@ -264,18 +246,13 @@ class MVT(nn.Module):
             # assert rot_x_y is None, f"rot_x_y={rot_x_y}"
 
         if self.training:
-            assert (
-                (not self.feat_ver == 1)
-                or (not wpt_local is None)
-            )
+            assert (self.feat_ver != 1) or (wpt_local is not None)
 
             if self.rot_ver == 0:
                 assert rot_x_y is None, f"rot_x_y={rot_x_y}"
             elif self.rot_ver == 1:
                 assert rot_x_y.shape == (bs, 2), f"rot_x_y.shape={rot_x_y.shape}"
-                assert (rot_x_y >= 0).all() and (
-                    rot_x_y < self.num_rot
-                ).all(), f"rot_x_y={rot_x_y}"
+                assert (rot_x_y >= 0).all() and (rot_x_y < self.num_rot).all(), f"rot_x_y={rot_x_y}"
             else:
                 assert False
 
@@ -287,14 +264,13 @@ class MVT(nn.Module):
             assert x1 == 3
             assert x2 == self.img_feat_dim
 
-
-        if not (wpt_local is None):
+        if wpt_local is not None:
             bs5, x6 = wpt_local.shape
             assert bs == bs5
             assert x6 == 3, "Does not support wpt_local of shape {wpt_local.shape}"
 
         if self.training:
-            assert (not self.stage_two) or (not wpt_local is None)
+            assert (not self.stage_two) or (wpt_local is not None)
 
     def forward(
         self,
@@ -332,7 +308,7 @@ class MVT(nn.Module):
                     # values in [-stdv, stdv]
                     noise = stdv * ((2 * torch.rand(*x.shape, device=x.device)) - 1)
                     x = x + noise
-           
+
             img = self.render(
                 pc=pc,
                 img_feat=img_feat,
@@ -341,12 +317,11 @@ class MVT(nn.Module):
                 dyn_cam_info=None,
             )
         if self.training:
-            wpt_local_stage_one = wpt_local  
+            wpt_local_stage_one = wpt_local
             wpt_local_stage_one = wpt_local_stage_one.clone().detach()
         else:
             wpt_local_stage_one = wpt_local
-        
-   
+
         out = self.mvt1(
             img=img,
             wpt_local=wpt_local_stage_one,
@@ -356,42 +331,44 @@ class MVT(nn.Module):
             # forward_no_feat=False,
             **kwargs,
         )
-        out["mvt1_ori_img"]=img.clone().detach()
+        out["mvt1_ori_img"] = img.clone().detach()
+
         def visualize_tensor(tensor, save_path=None):
             """
             Visualize a tensor of shape (3, 3, 224, 224) as three separate images.
             Each image will show the three channels (RGB) of the corresponding view.
-            
+
             Args:
                 tensor: torch.Tensor of shape (3, 3, 224, 224)
                 save_path: str, path to save the visualization. If None, only display the image.
             """
             # Convert tensor to numpy array
             tensor_np = tensor.detach().cpu().numpy()
-            
+
             # Create a figure with 3 subplots
             fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-            
+
             # Normalize the values to [0, 1] range
             tensor_np = (tensor_np - tensor_np.min()) / (tensor_np.max() - tensor_np.min())
-            
+
             # Plot each view
             for i in range(3):
                 # Transpose from (3, 224, 224) to (224, 224, 3) for RGB display
                 img = np.transpose(tensor_np[i], (1, 2, 0))
                 axes[i].imshow(img)
-                axes[i].set_title(f'View {i+1}')
-                axes[i].axis('off')
-            
+                axes[i].set_title(f"View {i+1}")
+                axes[i].axis("off")
+
             plt.tight_layout()
-            
+
             if save_path is not None:
                 # Create directory if it doesn't exist
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                plt.savefig(save_path, dpi=300, bbox_inches='tight')
+                plt.savefig(save_path, dpi=300, bbox_inches="tight")
                 print(f"Image saved to {save_path}")
-            
+
             plt.show()
+
         # visualize_tensor(img[0,:,3:6], save_path="/PATH_TO_SAVE_DIR/debug.png")
         if self.stage_two:
             with torch.no_grad():
@@ -402,28 +379,22 @@ class MVT(nn.Module):
                     wpt_local_stage_one_noisy = mvt_utils.add_uni_noi(
                         wpt_local_stage_one.clone().detach(), 2 * self.st_wpt_loc_aug
                     )
-                    pc, rev_trans = mvt_utils.trans_pc(
-                        pc, loc=wpt_local_stage_one_noisy, sca=self.st_sca
-                    )
+                    pc, rev_trans = mvt_utils.trans_pc(pc, loc=wpt_local_stage_one_noisy, sca=self.st_sca)
 
                     if self.st_wpt_loc_inp_no_noise:
-                        wpt_local2, _ = mvt_utils.trans_pc(
-                            wpt_local, loc=wpt_local_stage_one_noisy, sca=self.st_sca
-                        )
+                        wpt_local2, _ = mvt_utils.trans_pc(wpt_local, loc=wpt_local_stage_one_noisy, sca=self.st_sca)
                     else:
-                        wpt_local2, _ = mvt_utils.trans_pc(
-                            wpt_local, loc=wpt_local_stage_one, sca=self.st_sca
-                        )
+                        wpt_local2, _ = mvt_utils.trans_pc(wpt_local, loc=wpt_local_stage_one, sca=self.st_sca)
 
                 else:
                     # bs, 3
                     wpt_local = self.get_wpt(
-                        out, y_q=None, mvt1_or_mvt2=True,
+                        out,
+                        y_q=None,
+                        mvt1_or_mvt2=True,
                         dyn_cam_info=None,
                     )
-                    pc, rev_trans = mvt_utils.trans_pc(
-                        pc, loc=wpt_local, sca=self.st_sca
-                    )
+                    pc, rev_trans = mvt_utils.trans_pc(pc, loc=wpt_local, sca=self.st_sca)
                     # bad name!
                     wpt_local_stage_one_noisy = wpt_local
 
@@ -437,7 +408,7 @@ class MVT(nn.Module):
                     mvt1_or_mvt2=False,
                     dyn_cam_info=None,
                 )
-        
+
             out_mvt2 = self.mvt1(
                 img=img,
                 wpt_local=wpt_local2,
@@ -448,13 +419,11 @@ class MVT(nn.Module):
             )
 
             out["wpt_local1"] = wpt_local_stage_one_noisy
-            out["rev_trans"] = rev_trans 
+            out["rev_trans"] = rev_trans
             out["mvt2"] = out_mvt2
-            out["mvt2_ori_img"]=img.clone().detach()
+            out["mvt2_ori_img"] = img.clone().detach()
 
         return out
-
-
 
 
 if __name__ == "__main__":

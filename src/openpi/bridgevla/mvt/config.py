@@ -1,5 +1,6 @@
 # Adapted from https://github.com/NVlabs/RVT/blob/master/rvt/mvt/config.py
 from yacs.config import CfgNode as CN
+
 _C = CN()
 _C.depth = 8
 _C.img_size = 220

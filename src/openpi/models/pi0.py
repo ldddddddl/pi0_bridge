@@ -5,9 +5,9 @@ import einops
 import flax.nnx as nnx
 import flax.nnx.bridge as nnx_bridge
 import jax
+from jax import config
 import jax.numpy as jnp
 from typing_extensions import override
-import optax
 
 from openpi.models import model as _model
 import openpi.models.gemma as _gemma
@@ -15,7 +15,6 @@ import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
 import openpi.shared.nnx_utils as nnx_utils
 
-from jax import config
 config.update("jax_enable_x64", False)  # 默认情况下使用float32
 
 logger = logging.getLogger("openpi")
@@ -79,6 +78,7 @@ class Pi0Config(_model.BaseModelConfig):
     max_token_len: int = 48
     end_pos_dim: int = 8
     output_format: str = "end_pos"
+
     @property
     @override
     def model_type(self) -> _model.ModelType:
@@ -188,16 +188,15 @@ class Pi0(_model.BaseModel):
                 nnx.swish,
                 nnx.Linear(128, 64, rngs=rngs),
                 nnx.swish,
-                nnx.Linear(64, config.action_dim, rngs=rngs)
+                nnx.Linear(64, config.action_dim, rngs=rngs),
             )
-            
-            
+
     @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
         input_mask = []
-        ar_mask = [] # auto-regressive mask
+        ar_mask = []  # auto-regressive mask
         tokens = []
         # 嵌入图像
         for name in obs.images:
@@ -290,16 +289,14 @@ class Pi0(_model.BaseModel):
         # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
         if self.output_format == "end_pos":
             v_t_endpos = self.joint2endpos_head(v_t)
-            v_t = v_t_endpos  
-        
+            v_t = v_t_endpos
+
         return jnp.mean(jnp.square(v_t - u_t), axis=-1)
 
     @override
     def action2endpos(self, actions: _model.Actions) -> at.Float[at.Array, "*b ah ed"]:
         pass
         # return self.joint_2_endpos_out(actions)
-
-
 
     @override
     def sample_actions(
@@ -351,7 +348,7 @@ class Pi0(_model.BaseModel):
             # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
             if self.output_format == "end_pos":
                 v_t_endpos = self.joint2endpos_head(v_t)
-                v_t = v_t_endpos  
+                v_t = v_t_endpos
 
             return x_t + dt * v_t, time + dt
 
@@ -361,8 +358,8 @@ class Pi0(_model.BaseModel):
             return time >= -dt / 2
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
-        
+
         return x_0
-    
+
     # def get_mse_loss(self):
     #     return self.mse_loss_in, self.mse_loss_out

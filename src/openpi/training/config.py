@@ -582,21 +582,19 @@ _CONFIGS = [
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-            root="~/pi0_bridge/datasets/dobot_formate_0611"
+                root="~/pi0_bridge/datasets/dobot_formate_0611",
             ),
         ),
         # 定义要加载哪个预训练检查点来初始化模型。
         # 这应该与您上面选择的模型配置匹配 -- 在这种情况下，我们使用 pi0 基础模型。
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
-        
         # 在下面，您可以定义其他超参数，例如学习率、训练步骤等。
         # 查看基础 TrainConfig 类获取可用超参数的完整列表。
         # num_train_steps=30_000,
         num_train_steps=200,
         # batch_size=1,
     ),
-
     TrainConfig(
         name="pi0_libero_low_mem_finetune",
         # 这是一个加载 pi0 模型进行 LoRA 微调的示例。

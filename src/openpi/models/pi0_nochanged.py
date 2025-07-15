@@ -5,6 +5,7 @@ import einops
 import flax.nnx as nnx
 import flax.nnx.bridge as nnx_bridge
 import jax
+from jax import config
 import jax.numpy as jnp
 from typing_extensions import override
 
@@ -14,7 +15,6 @@ import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
 import openpi.shared.nnx_utils as nnx_utils
 
-from jax import config
 config.update("jax_enable_x64", False)  # 默认情况下使用float32
 
 logger = logging.getLogger("openpi")

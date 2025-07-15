@@ -1,12 +1,10 @@
 # Copy from https://github.com/NVlabs/RVT/blob/master/rvt/mvt/augmentation.py
-import numpy as np
-import torch
 import bridgevla.mvt.aug_utils as aug_utils
+import numpy as np
 from pytorch3d import transforms as torch3d_tf
 from scipy.spatial.transform import Rotation
 import torch
-import numpy as np
-from scipy.spatial.transform import Rotation as R
+
 
 def perturb_se3(pcd, trans_shift_4x4, rot_shift_4x4, action_gripper_4x4, bounds):
     """Perturb point clouds with given transformation.
@@ -56,12 +54,8 @@ def perturb_se3(pcd, trans_shift_4x4, rot_shift_4x4, action_gripper_4x4, bounds)
         else:
             assert False, len(p.shape)
 
-        action_trans_3x1 = (
-            action_gripper_4x4[:, 0:3, 3].unsqueeze(-1).repeat(1, 1, num_points)
-        )
-        trans_shift_3x1 = (
-            trans_shift_4x4[:, 0:3, 3].unsqueeze(-1).repeat(1, 1, num_points)
-        )
+        action_trans_3x1 = action_gripper_4x4[:, 0:3, 3].unsqueeze(-1).repeat(1, 1, num_points)
+        trans_shift_3x1 = trans_shift_4x4[:, 0:3, 3].unsqueeze(-1).repeat(1, 1, num_points)
 
         # flatten point cloud
         p_flat = p.reshape(bs, 3, -1)
@@ -81,24 +75,16 @@ def perturb_se3(pcd, trans_shift_4x4, rot_shift_4x4, action_gripper_4x4, bounds)
         bounds_z_min, bounds_z_max = bounds[:, 2].min(), bounds[:, 5].max()
 
         action_then_trans_3x1 = action_trans_3x1 + trans_shift_3x1
-        action_then_trans_3x1_x = torch.clamp(
-            action_then_trans_3x1[:, 0], min=bounds_x_min, max=bounds_x_max
-        )
-        action_then_trans_3x1_y = torch.clamp(
-            action_then_trans_3x1[:, 1], min=bounds_y_min, max=bounds_y_max
-        )
-        action_then_trans_3x1_z = torch.clamp(
-            action_then_trans_3x1[:, 2], min=bounds_z_min, max=bounds_z_max
-        )
+        action_then_trans_3x1_x = torch.clamp(action_then_trans_3x1[:, 0], min=bounds_x_min, max=bounds_x_max)
+        action_then_trans_3x1_y = torch.clamp(action_then_trans_3x1[:, 1], min=bounds_y_min, max=bounds_y_max)
+        action_then_trans_3x1_z = torch.clamp(action_then_trans_3x1[:, 2], min=bounds_z_min, max=bounds_z_max)
         action_then_trans_3x1 = torch.stack(
             [action_then_trans_3x1_x, action_then_trans_3x1_y, action_then_trans_3x1_z],
             dim=1,
         )
 
         # shift back the origin
-        perturbed_p_flat_3x1 = (
-            perturbed_p_flat_4x1_action_origin[:, :3, :] + action_then_trans_3x1
-        )
+        perturbed_p_flat_3x1 = perturbed_p_flat_4x1_action_origin[:, :3, :] + action_then_trans_3x1
         if permute_p:
             perturbed_p_flat_3x1 = torch.permute(perturbed_p_flat_3x1, (0, 2, 1))
         perturbed_p = perturbed_p_flat_3x1.reshape(p_shape)
@@ -150,9 +136,7 @@ def apply_se3_augmentation(
 
     # 4x4 matrix of keyframe action gripper pose
     action_gripper_trans = action_gripper_pose[:, :3]
-    action_gripper_quat_wxyz = torch.cat(
-        (action_gripper_pose[:, 6].unsqueeze(1), action_gripper_pose[:, 3:6]), dim=1
-    )
+    action_gripper_quat_wxyz = torch.cat((action_gripper_pose[:, 6].unsqueeze(1), action_gripper_pose[:, 3:6]), dim=1)
     action_gripper_rot = torch3d_tf.quaternion_to_matrix(action_gripper_quat_wxyz)
     action_gripper_4x4 = identity_4x4.detach().clone()
     action_gripper_4x4[:, :3, :3] = action_gripper_rot
@@ -170,9 +154,7 @@ def apply_se3_augmentation(
             raise Exception("Failing to perturb action and keep it within bounds.")
 
         # sample translation perturbation with specified range
-        trans_range = (bounds[:, 3:] - bounds[:, :3]) * trans_aug_range.to(
-            device=device
-        )
+        trans_range = (bounds[:, 3:] - bounds[:, :3]) * trans_aug_range.to(device=device)
         trans_shift = trans_range * aug_utils.rand_dist((bs, 3)).to(device=device)
         trans_shift_4x4 = identity_4x4.detach().clone()
         trans_shift_4x4[:, 0:3, 3] = trans_shift
@@ -182,18 +164,14 @@ def apply_se3_augmentation(
         pitch_aug_steps = int(rot_aug_range[1] // rot_aug_resolution)
         yaw_aug_steps = int(rot_aug_range[2] // rot_aug_resolution)
 
-        roll = aug_utils.rand_discrete(
-            (bs, 1), min=-roll_aug_steps, max=roll_aug_steps
-        ) * np.deg2rad(rot_aug_resolution)
-        pitch = aug_utils.rand_discrete(
-            (bs, 1), min=-pitch_aug_steps, max=pitch_aug_steps
-        ) * np.deg2rad(rot_aug_resolution)
-        yaw = aug_utils.rand_discrete(
-            (bs, 1), min=-yaw_aug_steps, max=yaw_aug_steps
-        ) * np.deg2rad(rot_aug_resolution)
-        rot_shift_3x3 = torch3d_tf.euler_angles_to_matrix(
-            torch.cat((roll, pitch, yaw), dim=1), "XYZ"
+        roll = aug_utils.rand_discrete((bs, 1), min=-roll_aug_steps, max=roll_aug_steps) * np.deg2rad(
+            rot_aug_resolution
         )
+        pitch = aug_utils.rand_discrete((bs, 1), min=-pitch_aug_steps, max=pitch_aug_steps) * np.deg2rad(
+            rot_aug_resolution
+        )
+        yaw = aug_utils.rand_discrete((bs, 1), min=-yaw_aug_steps, max=yaw_aug_steps) * np.deg2rad(rot_aug_resolution)
+        rot_shift_3x3 = torch3d_tf.euler_angles_to_matrix(torch.cat((roll, pitch, yaw), dim=1), "XYZ")
         rot_shift_4x4 = identity_4x4.detach().clone()
         rot_shift_4x4[:, :3, :3] = rot_shift_3x3
 
@@ -203,9 +181,7 @@ def apply_se3_augmentation(
 
         # convert transformation matrix to translation + quaternion
         perturbed_action_trans = perturbed_action_gripper_4x4[:, 0:3, 3].cpu().numpy()
-        perturbed_action_quat_wxyz = torch3d_tf.matrix_to_quaternion(
-            perturbed_action_gripper_4x4[:, :3, :3]
-        )
+        perturbed_action_quat_wxyz = torch3d_tf.matrix_to_quaternion(perturbed_action_gripper_4x4[:, :3, :3])
         perturbed_action_quat_xyzw = (
             torch.cat(
                 [
@@ -225,9 +201,7 @@ def apply_se3_augmentation(
             bounds_idx = b if layer > 0 else 0
             bounds_np = bounds[bounds_idx].cpu().numpy()
 
-            trans_idx = aug_utils.point_to_voxel_index(
-                perturbed_action_trans[b], voxel_size, bounds_np
-            )
+            trans_idx = aug_utils.point_to_voxel_index(perturbed_action_trans[b], voxel_size, bounds_np)
             trans_indicies.append(trans_idx.tolist())
 
             quat = perturbed_action_quat_xyzw[b]
@@ -235,16 +209,12 @@ def apply_se3_augmentation(
             if quat[-1] < 0:
                 quat = -quat
             disc_rot = aug_utils.quaternion_to_discrete_euler(quat, rot_resolution)
-            rot_grip_indicies.append(
-                disc_rot.tolist() + [int(action_rot_grip[b, 3].cpu().numpy())]
-            )
+            rot_grip_indicies.append(disc_rot.tolist() + [int(action_rot_grip[b, 3].cpu().numpy())])
 
         # if the perturbed action is out of bounds,
         # the discretized perturb_trans should have invalid indicies
         perturbed_trans = torch.from_numpy(np.array(trans_indicies)).to(device=device)
-        perturbed_rot_grip = torch.from_numpy(np.array(rot_grip_indicies)).to(
-            device=device
-        )
+        perturbed_rot_grip = torch.from_numpy(np.array(rot_grip_indicies)).to(device=device)
 
     action_trans = perturbed_trans
     action_rot_grip = perturbed_rot_grip
@@ -352,9 +322,7 @@ def apply_se3_aug_con(
     roll = np.deg2rad(rot_aug_range[:, 0:1] * aug_utils.rand_dist((bs, 1)))
     pitch = np.deg2rad(rot_aug_range[:, 1:2] * aug_utils.rand_dist((bs, 1)))
     yaw = np.deg2rad(rot_aug_range[:, 2:3] * aug_utils.rand_dist((bs, 1)))
-    rot_shift_3x3 = torch3d_tf.euler_angles_to_matrix(
-        torch.cat((roll, pitch, yaw), dim=1), "XYZ"
-    )
+    rot_shift_3x3 = torch3d_tf.euler_angles_to_matrix(torch.cat((roll, pitch, yaw), dim=1), "XYZ")
     rot_shift_4x4 = identity_4x4.detach().clone()
     rot_shift_4x4[:, :3, :3] = rot_shift_3x3
 
@@ -374,9 +342,7 @@ def apply_se3_aug_con(
 
     # convert transformation matrix to translation + quaternion
     perturbed_action_trans = perturbed_action_gripper_4x4[:, 0:3, 3].cpu().numpy()
-    perturbed_action_quat_wxyz = torch3d_tf.matrix_to_quaternion(
-        perturbed_action_gripper_4x4[:, :3, :3]
-    )
+    perturbed_action_quat_wxyz = torch3d_tf.matrix_to_quaternion(perturbed_action_gripper_4x4[:, :3, :3])
     perturbed_action_quat_xyzw = (
         torch.cat(
             [

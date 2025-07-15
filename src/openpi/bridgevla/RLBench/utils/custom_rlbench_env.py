@@ -9,9 +9,7 @@ class CustomMultiTaskRLBenchEnv2(CustomMultiTaskRLBenchEnv):
     def reset(self) -> dict:
         super().reset()
         self._record_current_episode = (
-            self.eval
-            and self._record_every_n > 0
-            and self._episode_index % self._record_every_n == 0
+            self.eval and self._record_every_n > 0 and self._episode_index % self._record_every_n == 0
         )
         return self._previous_obs_dict
 
@@ -23,9 +21,7 @@ class CustomMultiTaskRLBenchEnv2(CustomMultiTaskRLBenchEnv):
 
         self._i = 0
         self._task.set_variation(-1)
-        d = self._task.get_demos(
-            1, live_demos=False, random_selection=False, from_episode_number=i
-        )[0]
+        d = self._task.get_demos(1, live_demos=False, random_selection=False, from_episode_number=i)[0]
 
         self._task.set_variation(d.variation_number)
         desc, obs = self._task.reset_to_demo(d)
@@ -33,9 +29,7 @@ class CustomMultiTaskRLBenchEnv2(CustomMultiTaskRLBenchEnv):
 
         self._previous_obs_dict = self.extract_obs(obs)
         self._record_current_episode = (
-            self.eval
-            and self._record_every_n > 0
-            and self._episode_index % self._record_every_n == 0
+            self.eval and self._record_every_n > 0 and self._episode_index % self._record_every_n == 0
         )
         self._episode_index += 1
         self._recorded_images.clear()

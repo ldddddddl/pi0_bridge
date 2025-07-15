@@ -1,20 +1,21 @@
 # Copy from https://github.com/robot-colosseum/rvt_colosseum/blob/main/rvt/utils/get_dataset.py
 import os
 import shutil
-import torch
-import clip
 import sys
+
+import clip
+import torch
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "."))
-from dataset import create_replay, fill_replay
-from peract_utils_rlbench import (
-    CAMERAS,
-    SCENE_BOUNDS,
-    EPISODE_FOLDER,
-    VARIATION_DESCRIPTIONS_PKL,
-    DEMO_AUGMENTATION_EVERY_N,
-    ROTATION_RESOLUTION,
-    VOXEL_SIZES,
-)
+from dataset import create_replay
+from dataset import fill_replay
+from peract_utils_rlbench import CAMERAS
+from peract_utils_rlbench import DEMO_AUGMENTATION_EVERY_N
+from peract_utils_rlbench import EPISODE_FOLDER
+from peract_utils_rlbench import ROTATION_RESOLUTION
+from peract_utils_rlbench import SCENE_BOUNDS
+from peract_utils_rlbench import VARIATION_DESCRIPTIONS_PKL
+from peract_utils_rlbench import VOXEL_SIZES
 from yarr.replay_buffer.wrappers.pytorch_replay_buffer import PyTorchReplayBuffer
 
 
@@ -33,7 +34,6 @@ def get_dataset(
     only_train,
     sample_distribution_mode="transition_uniform",
 ):
-
     train_replay_buffer = create_replay(
         batch_size=BATCH_SIZE_TRAIN,
         timesteps=1,
@@ -59,13 +59,12 @@ def get_dataset(
         print("WARNING: Setting Clip to None. Will not work if replay not on disk.")
         clip_model = None
 
-    
     for task in tasks:  # for each task
         # print("---- Preparing the data for {} task ----".format(task), flush=True)
-        
+
         EPISODES_FOLDER_TRAIN = f"train/{task}/all_variations/episodes"
         EPISODES_FOLDER_VAL = f"val/{task}/all_variations/episodes"
-      
+
         data_path_train = os.path.join(DATA_FOLDER, EPISODES_FOLDER_TRAIN)
         data_path_val = os.path.join(DATA_FOLDER, EPISODES_FOLDER_VAL)
         train_replay_storage_folder = f"{TRAIN_REPLAY_STORAGE_DIR}/{task}"
@@ -74,14 +73,10 @@ def get_dataset(
         # if refresh_replay, then remove the existing replay data folder
         if refresh_replay:
             print("[Info] Remove exisitng replay dataset as requested.", flush=True)
-            if os.path.exists(train_replay_storage_folder) and os.path.isdir(
-                train_replay_storage_folder
-            ):
+            if os.path.exists(train_replay_storage_folder) and os.path.isdir(train_replay_storage_folder):
                 shutil.rmtree(train_replay_storage_folder)
                 print(f"remove {train_replay_storage_folder}")
-            if os.path.exists(test_replay_storage_folder) and os.path.isdir(
-                test_replay_storage_folder
-            ):
+            if os.path.exists(test_replay_storage_folder) and os.path.isdir(test_replay_storage_folder):
                 shutil.rmtree(test_replay_storage_folder)
                 print(f"remove {test_replay_storage_folder}")
 
@@ -152,5 +147,3 @@ def get_dataset(
         )
         test_dataset = test_wrapped_replay.dataset()
     return train_dataset, test_dataset
-
-

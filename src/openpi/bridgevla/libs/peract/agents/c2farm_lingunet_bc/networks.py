@@ -1,25 +1,28 @@
+from helpers.network_utils import Conv3DBlock
+from helpers.network_utils import Conv3DInceptionBlock
+from helpers.network_utils import Conv3DInceptionBlockUpsampleBlock
+from helpers.network_utils import DenseBlock
+from helpers.network_utils import SpatialSoftmax3D
 import torch
 import torch.nn as nn
 
-from helpers.network_utils import Conv3DInceptionBlock, DenseBlock, SpatialSoftmax3D, \
-    Conv3DInceptionBlockUpsampleBlock, Conv3DBlock
-
 
 class QattentionLingU3DNet(nn.Module):
-
-    def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 out_dense: int,
-                 voxel_size: int,
-                 low_dim_size: int,
-                 kernels: int,
-                 norm: str = None,
-                 activation: str = 'relu',
-                 dense_feats: int = 32,
-                 include_prev_layer = False,
-                 depth = 0,
-                 lingunet_dropout = 0.0,):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        out_dense: int,
+        voxel_size: int,
+        low_dim_size: int,
+        kernels: int,
+        norm: str = None,
+        activation: str = "relu",
+        dense_feats: int = 32,
+        include_prev_layer=False,
+        depth=0,
+        lingunet_dropout=0.0,
+    ):
         super(QattentionLingU3DNet, self).__init__()
         self._in_channels = in_channels
         self._out_channels = out_channels
@@ -44,12 +47,12 @@ class QattentionLingU3DNet(nn.Module):
         use_residual = False
         self._build_calls += 1
         if self._build_calls != 1:
-            raise RuntimeError('Build needs to be called once.')
+            raise RuntimeError("Build needs to be called once.")
 
         spatial_size = self._voxel_size
         self._input_preprocess = Conv3DInceptionBlock(
-            self._in_channels, self._kernels, norm=self._norm,
-            activation=self._activation)
+            self._in_channels, self._kernels, norm=self._norm, activation=self._activation
+        )
 
         d0_ins = self._input_preprocess.out_channels
         if self._include_prev_layer:
@@ -57,23 +60,22 @@ class QattentionLingU3DNet(nn.Module):
             d0_ins += self._input_preprocess.out_channels * self._depth
 
         if self._low_dim_size > 0:
-            self._proprio_preprocess = DenseBlock(
-                self._low_dim_size, self._kernels, None, self._activation)
+            self._proprio_preprocess = DenseBlock(self._low_dim_size, self._kernels, None, self._activation)
             d0_ins += self._kernels
 
         self._down0 = Conv3DInceptionBlock(
-            d0_ins, self._kernels, norm=self._norm,
-            activation=self._activation, residual=use_residual)
-        self._ss0 = SpatialSoftmax3D(
-            spatial_size, spatial_size, spatial_size,
-            self._down0.out_channels)
+            d0_ins, self._kernels, norm=self._norm, activation=self._activation, residual=use_residual
+        )
+        self._ss0 = SpatialSoftmax3D(spatial_size, spatial_size, spatial_size, self._down0.out_channels)
         spatial_size //= 2
         self._down1 = Conv3DInceptionBlock(
-            self._down0.out_channels, self._kernels * 2, norm=self._norm,
-            activation=self._activation, residual=use_residual)
-        self._ss1 = SpatialSoftmax3D(
-            spatial_size, spatial_size, spatial_size,
-            self._down1.out_channels)
+            self._down0.out_channels,
+            self._kernels * 2,
+            norm=self._norm,
+            activation=self._activation,
+            residual=use_residual,
+        )
+        self._ss1 = SpatialSoftmax3D(spatial_size, spatial_size, spatial_size, self._down1.out_channels)
         spatial_size //= 2
 
         flat_size = self._down0.out_channels * 4 + self._down1.out_channels * 4
@@ -82,61 +84,63 @@ class QattentionLingU3DNet(nn.Module):
         if self._voxel_size > 8:
             k1 += self._kernels
             self._down2 = Conv3DInceptionBlock(
-                self._down1.out_channels, self._kernels * 4, norm=self._norm,
-                activation=self._activation,  residual=use_residual)
-            self._lang_proj2 = DenseBlock(
-                self._clip_lang_feat_dim, self._down2.out_channels, None, None)
+                self._down1.out_channels,
+                self._kernels * 4,
+                norm=self._norm,
+                activation=self._activation,
+                residual=use_residual,
+            )
+            self._lang_proj2 = DenseBlock(self._clip_lang_feat_dim, self._down2.out_channels, None, None)
             self._dropout2 = nn.Dropout(self._lingunet_dropout)
             flat_size += self._down2.out_channels * 4
-            self._ss2 = SpatialSoftmax3D(
-                spatial_size, spatial_size, spatial_size,
-                self._down2.out_channels)
+            self._ss2 = SpatialSoftmax3D(spatial_size, spatial_size, spatial_size, self._down2.out_channels)
             spatial_size //= 2
             k2 = self._down2.out_channels
             if self._voxel_size > 16:
                 k2 *= 2
                 self._down3 = Conv3DInceptionBlock(
-                    self._down2.out_channels, self._kernels, norm=self._norm,
-                    activation=self._activation, residual=use_residual)
-                self._lang_proj3 = DenseBlock(
-                    self._clip_lang_feat_dim, self._down3.out_channels, None, None)
+                    self._down2.out_channels,
+                    self._kernels,
+                    norm=self._norm,
+                    activation=self._activation,
+                    residual=use_residual,
+                )
+                self._lang_proj3 = DenseBlock(self._clip_lang_feat_dim, self._down3.out_channels, None, None)
                 self._dropout3 = nn.Dropout(self._lingunet_dropout)
                 flat_size += self._down3.out_channels * 4
-                self._ss3 = SpatialSoftmax3D(
-                    spatial_size, spatial_size, spatial_size,
-                    self._down3.out_channels)
+                self._ss3 = SpatialSoftmax3D(spatial_size, spatial_size, spatial_size, self._down3.out_channels)
                 self._up3 = Conv3DInceptionBlockUpsampleBlock(
-                    self._kernels, self._kernels * 4, 2, norm=self._norm,
-                    activation=self._activation, residual=use_residual)
+                    self._kernels,
+                    self._kernels * 4,
+                    2,
+                    norm=self._norm,
+                    activation=self._activation,
+                    residual=use_residual,
+                )
             self._up2 = Conv3DInceptionBlockUpsampleBlock(
-                k2, self._kernels, 2, norm=self._norm,
-                activation=self._activation, residual=use_residual)
+                k2, self._kernels, 2, norm=self._norm, activation=self._activation, residual=use_residual
+            )
 
         self._up1 = Conv3DInceptionBlockUpsampleBlock(
-            k1, self._kernels, 2, norm=self._norm,
-            activation=self._activation, residual=use_residual)
+            k1, self._kernels, 2, norm=self._norm, activation=self._activation, residual=use_residual
+        )
 
         self._global_maxp = nn.AdaptiveMaxPool3d(1)
         self._local_maxp = nn.MaxPool3d(3, 2, padding=1)
         self._final = Conv3DBlock(
-            self._kernels * 2, self._kernels, kernel_sizes=3,
-            strides=1, norm=self._norm, activation=self._activation)
+            self._kernels * 2, self._kernels, kernel_sizes=3, strides=1, norm=self._norm, activation=self._activation
+        )
         self._final2 = Conv3DBlock(
-            self._kernels, self._out_channels, kernel_sizes=3,
-            strides=1, norm=None, activation=None)
+            self._kernels, self._out_channels, kernel_sizes=3, strides=1, norm=None, activation=None
+        )
 
-        self._ss_final = SpatialSoftmax3D(
-            self._voxel_size, self._voxel_size, self._voxel_size,
-            self._kernels)
+        self._ss_final = SpatialSoftmax3D(self._voxel_size, self._voxel_size, self._voxel_size, self._kernels)
         flat_size += self._kernels * 4
 
         if self._out_dense > 0:
-            self._dense0 = DenseBlock(
-                flat_size, self._dense_feats, None, self._activation)
-            self._dense1 = DenseBlock(
-                self._dense_feats, self._dense_feats, None, self._activation)
-            self._dense2 = DenseBlock(
-                self._dense_feats, self._out_dense, None, None)
+            self._dense0 = DenseBlock(flat_size, self._dense_feats, None, self._activation)
+            self._dense1 = DenseBlock(self._dense_feats, self._dense_feats, None, self._activation)
+            self._dense2 = DenseBlock(self._dense_feats, self._out_dense, None, None)
 
     def _proj_feature(self, x, spatial_size, proj_fn):
         x = proj_fn(x)
@@ -144,10 +148,7 @@ class QattentionLingU3DNet(nn.Module):
         x = x.repeat(1, 1, spatial_size, spatial_size, spatial_size)
         return x
 
-    def forward(self, ins, proprio,
-                lang_goal_embs, lang_token_embs,
-                bounds, prev_bounds,
-                prev_layer_voxel_grid):
+    def forward(self, ins, proprio, lang_goal_embs, lang_token_embs, bounds, prev_bounds, prev_layer_voxel_grid):
         b, _, d, h, w = ins.shape
         x = self._input_preprocess(ins)
 
@@ -158,8 +159,7 @@ class QattentionLingU3DNet(nn.Module):
 
         if self._low_dim_size > 0:
             p = self._proprio_preprocess(proprio)
-            p = p.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(
-                1, 1, d, h, w)
+            p = p.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, d, h, w)
             x = torch.cat([x, p], dim=1)
 
         l_feat = lang_goal_embs
@@ -201,10 +201,10 @@ class QattentionLingU3DNet(nn.Module):
         feats.extend([self._ss_final(f1), self._global_maxp(f1).view(b, -1)])
 
         self.latent_dict = {
-            'd0': d0.mean(-1).mean(-1).mean(-1),
-            'd1': d1.mean(-1).mean(-1).mean(-1),
-            'u1': u1.mean(-1).mean(-1).mean(-1),
-            'trans_out': trans,
+            "d0": d0.mean(-1).mean(-1).mean(-1),
+            "d1": d1.mean(-1).mean(-1).mean(-1),
+            "u1": u1.mean(-1).mean(-1).mean(-1),
+            "trans_out": trans,
         }
 
         rot_and_grip_out, collision_out = None, None
@@ -214,21 +214,27 @@ class QattentionLingU3DNet(nn.Module):
             rot_and_grip_collision_out = self._dense2(dense1)
             rot_and_grip_out = rot_and_grip_collision_out[:, :-2]
             collision_out = rot_and_grip_collision_out[:, -2:]
-            self.latent_dict.update({
-                'dense0': dense0,
-                'dense1': dense1,
-                'dense2': rot_and_grip_collision_out,
-            })
+            self.latent_dict.update(
+                {
+                    "dense0": dense0,
+                    "dense1": dense1,
+                    "dense2": rot_and_grip_collision_out,
+                }
+            )
 
         if self._voxel_size > 8:
-            self.latent_dict.update({
-                'd2': d2.mean(-1).mean(-1).mean(-1),
-                'u2': u2.mean(-1).mean(-1).mean(-1),
-            })
+            self.latent_dict.update(
+                {
+                    "d2": d2.mean(-1).mean(-1).mean(-1),
+                    "u2": u2.mean(-1).mean(-1).mean(-1),
+                }
+            )
         if self._voxel_size > 16:
-            self.latent_dict.update({
-                'd3': d3.mean(-1).mean(-1).mean(-1),
-                'u3': u3.mean(-1).mean(-1).mean(-1),
-            })
+            self.latent_dict.update(
+                {
+                    "d3": d3.mean(-1).mean(-1).mean(-1),
+                    "u3": u3.mean(-1).mean(-1).mean(-1),
+                }
+            )
 
         return trans, rot_and_grip_out, collision_out

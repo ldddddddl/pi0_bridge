@@ -278,7 +278,6 @@ class BaseModel(nnx.Module, abc.ABC):
 
     @abc.abstractmethod
     def action2endpos(self, actions: Actions) -> at.Float[at.Array, "*b ah ed"]: ...
-        
 
 
 def restore_params(

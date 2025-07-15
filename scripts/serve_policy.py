@@ -9,9 +9,10 @@ from openpi.policies import policy as _policy
 from openpi.policies import policy_config as _policy_config
 from openpi.serving import websocket_policy_server
 from openpi.training import config as _config
-import os
+
 # os.environ["http_proxy"] = "http://localhost:10808"
 # os.environ["https_proxy"] = "http://localhost:10808"
+
 
 class EnvMode(enum.Enum):
     """Supported environments."""

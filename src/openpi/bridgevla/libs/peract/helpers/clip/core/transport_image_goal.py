@@ -1,7 +1,6 @@
-import numpy as np
 import cliport.models as models
 from cliport.utils import utils
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,7 +26,7 @@ class TransportImageGoal(nn.Module):
         self.preprocess = preprocess
         self.cfg = cfg
         self.device = device
-        self.batchnorm = self.cfg['train']['batchnorm']
+        self.batchnorm = self.cfg["train"]["batchnorm"]
 
         self.pad_size = int(self.crop_size / 2)
         self.padding = np.zeros((3, 2), dtype=int)
@@ -40,9 +39,9 @@ class TransportImageGoal(nn.Module):
         # Crop before network (default for Transporters CoRL 2020).
         self.kernel_shape = (self.crop_size, self.crop_size, self.in_shape[2])
 
-        if not hasattr(self, 'output_dim'):
+        if not hasattr(self, "output_dim"):
             self.output_dim = 3
-        if not hasattr(self, 'kernel_dim'):
+        if not hasattr(self, "kernel_dim"):
             self.kernel_dim = 3
 
         self.rotator = utils.ImageRotator(self.n_rotations)
@@ -60,8 +59,8 @@ class TransportImageGoal(nn.Module):
     def correlate(self, in0, in1, softmax):
         """Correlate two input tensors."""
         output = F.conv2d(in0, in1, padding=(self.pad_size, self.pad_size))
-        output = F.interpolate(output, size=(in0.shape[-2], in0.shape[-1]), mode='bilinear')
-        output = output[:,:,self.pad_size:-self.pad_size, self.pad_size:-self.pad_size]
+        output = F.interpolate(output, size=(in0.shape[-2], in0.shape[-1]), mode="bilinear")
+        output = output[:, :, self.pad_size : -self.pad_size, self.pad_size : -self.pad_size]
         if softmax:
             output_shape = output.shape
             output = output.reshape((1, np.prod(output.shape)))
@@ -73,7 +72,7 @@ class TransportImageGoal(nn.Module):
         """Forward pass."""
 
         # Input image.
-        img_unprocessed = np.pad(inp_img, self.padding, mode='constant')
+        img_unprocessed = np.pad(inp_img, self.padding, mode="constant")
         input_data = img_unprocessed
         in_shape = (1,) + input_data.shape
         input_data = input_data.reshape(in_shape)
@@ -81,7 +80,7 @@ class TransportImageGoal(nn.Module):
         in_tensor = in_tensor.permute(0, 3, 1, 2)
 
         # Goal image.
-        goal_tensor = np.pad(goal_img, self.padding, mode='constant')
+        goal_tensor = np.pad(goal_img, self.padding, mode="constant")
         goal_shape = (1,) + goal_tensor.shape
         goal_tensor = goal_tensor.reshape(goal_shape)
         goal_tensor = torch.from_numpy(goal_tensor.copy()).to(dtype=torch.float, device=self.device)
@@ -95,13 +94,13 @@ class TransportImageGoal(nn.Module):
         in_crop = in_tensor.repeat(self.n_rotations, 1, 1, 1)
         in_crop = self.rotator(in_crop, pivot=pv)
         in_crop = torch.cat(in_crop, dim=0)
-        in_crop = in_crop[:, :, pv[0]-hcrop:pv[0]+hcrop, pv[1]-hcrop:pv[1]+hcrop]
+        in_crop = in_crop[:, :, pv[0] - hcrop : pv[0] + hcrop, pv[1] - hcrop : pv[1] + hcrop]
 
         # Cropped goal features.
         goal_crop = goal_tensor.repeat(self.n_rotations, 1, 1, 1)
         goal_crop = self.rotator(goal_crop, pivot=pv)
         goal_crop = torch.cat(goal_crop, dim=0)
-        goal_crop = goal_crop[:, :, pv[0]-hcrop:pv[0]+hcrop, pv[1]-hcrop:pv[1]+hcrop]
+        goal_crop = goal_crop[:, :, pv[0] - hcrop : pv[0] + hcrop, pv[1] - hcrop : pv[1] + hcrop]
 
         in_logits = self.key_resnet(in_tensor)
         goal_logits = self.goal_resnet(goal_tensor)
@@ -109,7 +108,7 @@ class TransportImageGoal(nn.Module):
         goal_crop = self.goal_resnet(goal_crop)
 
         # Fuse Goal and Transport features
-        goal_x_in_logits = goal_logits + in_logits # Mohit: why doesn't multiply work? :(
+        goal_x_in_logits = goal_logits + in_logits  # Mohit: why doesn't multiply work? :(
         goal_x_kernel = goal_crop + kernel_crop
 
         # TODO(Mohit): Crop after network. Broken for now
@@ -126,4 +125,3 @@ class TransportImageGoal(nn.Module):
         # goal_crop = goal_crop[:, :, pv[0]-hcrop:pv[0]+hcrop, pv[1]-hcrop:pv[1]+hcrop]
 
         return self.correlate(goal_x_in_logits, goal_x_kernel, softmax)
-

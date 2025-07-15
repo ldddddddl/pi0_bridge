@@ -1,5 +1,6 @@
-from abc import ABC, abstractmethod
-from typing import Any, List
+from abc import ABC
+from abc import abstractmethod
+from typing import Any
 
 import numpy as np
 
@@ -8,7 +9,6 @@ from yarr.utils.transition import Transition
 
 
 class Env(ABC):
-
     def __init__(self):
         self._active_task_id = 0
         self._eval_env = False
@@ -42,7 +42,7 @@ class Env(ABC):
 
     @property
     @abstractmethod
-    def observation_elements(self) -> List[ObservationElement]:
+    def observation_elements(self) -> list[ObservationElement]:
         pass
 
     @property
@@ -57,7 +57,6 @@ class Env(ABC):
 
 
 class MultiTaskEnv(Env):
-
     @property
     @abstractmethod
     def num_tasks(self) -> int:

@@ -1,19 +1,14 @@
 # Copy from https://github.com/NVlabs/RVT/blob/master/rvt/mvt/renderer.py
-from math import ceil, floor
-from typing import Optional, Tuple
 
-import torch
-
-from torch import nn
+from pytorch3d.renderer import AlphaCompositor
+from pytorch3d.renderer import FoVOrthographicCameras
+from pytorch3d.renderer import NormWeightedCompositor
+from pytorch3d.renderer import PointsRasterizationSettings
+from pytorch3d.renderer import PointsRasterizer
+from pytorch3d.renderer import look_at_view_transform
 from pytorch3d.structures import Pointclouds
-from pytorch3d.renderer import (
-    look_at_view_transform,
-    FoVOrthographicCameras,
-    PointsRasterizationSettings,
-    PointsRasterizer,
-    AlphaCompositor,
-    NormWeightedCompositor,
-)
+import torch
+from torch import nn
 
 
 # source: https://discuss.pytorch.org/t/batched-index-select/9115/6
@@ -68,8 +63,8 @@ def get_cube_R_T(
 
 
 def select_feat_from_hm(
-    pt_cam: torch.Tensor, hm: torch.Tensor, pt_cam_wei: Optional[torch.Tensor] = None
-) -> Tuple[torch.Tensor]:
+    pt_cam: torch.Tensor, hm: torch.Tensor, pt_cam_wei: torch.Tensor | None = None
+) -> tuple[torch.Tensor]:
     """
     :param pt_cam:
         continuous location of point coordinates from where value needs to be
@@ -322,12 +317,8 @@ class BoxRenderer:
 
     def _get_fix_ren(self):
         if self._fix_ren is None:
-            rasterizer = PointsRasterizer(
-                cameras=self._get_fix_cam(), raster_settings=self._raster_settings
-            )
-            self._fix_ren = PointsRendererWithDepth(
-                rasterizer=rasterizer, compositor=self._compositor
-            )
+            rasterizer = PointsRasterizer(cameras=self._get_fix_cam(), raster_settings=self._raster_settings)
+            self._fix_ren = PointsRendererWithDepth(rasterizer=rasterizer, compositor=self._compositor)
 
         return self._fix_ren
 
@@ -345,9 +336,7 @@ class BoxRenderer:
         assert R.shape[1] == R.shape[2] == T.shape[1] == 3
         assert (K is None) or ((len(K.shape) == 3) and (K.shape == (R.shape[0], 4, 4)))
 
-        dyn_cam = FoVOrthographicCameras(
-            device=self.device, R=R, T=T, znear=0.01, scale_xyz=scale, K=K
-        )
+        dyn_cam = FoVOrthographicCameras(device=self.device, R=R, T=T, znear=0.01, scale_xyz=scale, K=K)
 
         return dyn_cam
 
@@ -361,9 +350,7 @@ class BoxRenderer:
             cameras=self._get_dyn_cam(_dyn_cam_info),
             raster_settings=self._raster_settings,
         )
-        dyn_ren = PointsRendererWithDepth(
-            rasterizer=rasterizer, compositor=self._compositor
-        )
+        dyn_ren = PointsRendererWithDepth(rasterizer=rasterizer, compositor=self._compositor)
         return dyn_ren
 
     def img_norm(self, img):
@@ -375,10 +362,9 @@ class BoxRenderer:
                 if img[..., :-1].max() > 1:
                     assert img[..., :-1].max() < 1.001, img[..., :-1].max()
                     img[..., :-1] /= img[..., :-1].max()
-            else:
-                if img.max() > 1:
-                    assert img.max() < 1.001
-                    img /= img.max()
+            elif img.max() > 1:
+                assert img.max() < 1.001
+                img /= img.max()
         return img
 
     @torch.no_grad()
@@ -399,8 +385,7 @@ class BoxRenderer:
         assert len(feat.shape) == 2
         assert isinstance(pc, torch.Tensor)
         assert (dyn_cam_info is None) or (
-            isinstance(dyn_cam_info, (list, tuple))
-            and isinstance(dyn_cam_info[0], tuple)
+            isinstance(dyn_cam_info, (list, tuple)) and isinstance(dyn_cam_info[0], tuple)
         ), dyn_cam_info
 
         pc = [pc]
@@ -415,7 +400,7 @@ class BoxRenderer:
             fix_img = self.img_norm(fix_img)
             img.append(fix_img)
 
-        if not dyn_cam_info is None:
+        if dyn_cam_info is not None:
             assert len(dyn_cam_info) == 1
             dyn_cam_info = dyn_cam_info[0]
             num_dyn_img = dyn_cam_info[0].shape[0]
@@ -449,17 +434,14 @@ class BoxRenderer:
         assert pt.shape[-1] == 3
         bs, np = pt.shape[0:2]
         assert (dyn_cam_info is None) or (
-            isinstance(dyn_cam_info, (list, tuple))
-            and isinstance(dyn_cam_info[0], tuple)
+            isinstance(dyn_cam_info, (list, tuple)) and isinstance(dyn_cam_info[0], tuple)
         ), dyn_cam_info
 
         pt_img = []
         if fix_cam:
             fix_cam = self._get_fix_cam()
             # (num_cam, bs * np, 2)
-            pt_scr = fix_cam.transform_points_screen(
-                pt.view(-1, 3), image_size=self.img_size
-            )[..., 0:2]
+            pt_scr = fix_cam.transform_points_screen(pt.view(-1, 3), image_size=self.img_size)[..., 0:2]
             if len(fix_cam) == 1:
                 pt_scr = pt_scr.unsqueeze(0)
 
@@ -471,15 +453,13 @@ class BoxRenderer:
             fix_pt_img = fix_pt_img.view(bs, np, len(fix_cam), 2)
             pt_img.append(fix_pt_img)
 
-        if not dyn_cam_info is None:
+        if dyn_cam_info is not None:
             assert pt.shape[0] == len(dyn_cam_info)
             dyn_pt_img = []
             for _pt, _dyn_cam_info in zip(pt, dyn_cam_info):
                 dyn_cam = self._get_dyn_cam(_dyn_cam_info)
                 # (num_cam, np, 2)
-                _pt_scr = dyn_cam.transform_points_screen(
-                    _pt, image_size=self.img_size
-                )[..., 0:2]
+                _pt_scr = dyn_cam.transform_points_screen(_pt, image_size=self.img_size)[..., 0:2]
                 if len(dyn_cam) == 1:
                     _pt_scr = _pt_scr.unsqueeze(0)
 
@@ -507,11 +487,10 @@ class BoxRenderer:
         x, nc, h, w = hm.shape
         assert x == 1
         assert (dyn_cam_info is None) or (
-            isinstance(dyn_cam_info, (list, tuple))
-            and isinstance(dyn_cam_info[0], tuple)
+            isinstance(dyn_cam_info, (list, tuple)) and isinstance(dyn_cam_info[0], tuple)
         ), dyn_cam_info
         num_dyn_img = 0
-        if not dyn_cam_info is None:
+        if dyn_cam_info is not None:
             num_dyn_img = dyn_cam_info[0][0].shape[0]
         assert nc == self.num_img
         assert self.img_size == (h, w)
@@ -536,20 +515,16 @@ class BoxRenderer:
             else:
                 pts_cam = self._fix_pts_cam
                 pts_cam_wei = self._fix_pts_cam_wei
-                fix_pts_hm = select_feat_from_hm_cache(
-                    pts_cam, hm.transpose(0, 1)[0 : self.num_fix_cam], pts_cam_wei
-                )
+                fix_pts_hm = select_feat_from_hm_cache(pts_cam, hm.transpose(0, 1)[0 : self.num_fix_cam], pts_cam_wei)
             pts_hm.append(fix_pts_hm)
 
-        if not dyn_cam_info is None:
+        if dyn_cam_info is not None:
             pts_img = self.get_pt_loc_on_img(
                 self._pts.unsqueeze(0),
                 fix_cam=False,
                 dyn_cam_info=dyn_cam_info,
             ).squeeze(0)
-            dyn_pts_hm, _, _ = select_feat_from_hm(
-                pts_img.transpose(0, 1), hm.transpose(0, 1)[self.num_fix_cam :]
-            )
+            dyn_pts_hm, _, _ = select_feat_from_hm(pts_img.transpose(0, 1), hm.transpose(0, 1)[self.num_fix_cam :])
             pts_hm.append(dyn_pts_hm)
 
         pts_hm = torch.cat(pts_hm, 0)
@@ -570,11 +545,10 @@ class BoxRenderer:
         x, nc, h, w = hm.shape
         assert x == 1
         assert (dyn_cam_info is None) or (
-            isinstance(dyn_cam_info, (list, tuple))
-            and isinstance(dyn_cam_info[0], tuple)
+            isinstance(dyn_cam_info, (list, tuple)) and isinstance(dyn_cam_info[0], tuple)
         ), dyn_cam_info
         num_dyn_img = 0
-        if not dyn_cam_info is None:
+        if dyn_cam_info is not None:
             num_dyn_img = dyn_cam_info[0][0].shape[0]
             assert len(dyn_cam_info) == 1
         assert nc == self.num_img

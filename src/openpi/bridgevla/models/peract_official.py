@@ -1,6 +1,8 @@
-#Copy from https://github.com/NVlabs/RVT/blob/master/rvt/models/peract_official.py
-from ..libs.peract.helpers.preprocess_agent import PreprocessAgent
+# Copy from https://github.com/NVlabs/RVT/blob/master/rvt/models/peract_official.py
 from ..libs.peract.agents.peract_bc.launch_utils import create_agent
+from ..libs.peract.helpers.preprocess_agent import PreprocessAgent
+
+
 class PreprocessAgent2(PreprocessAgent):
     def eval(self):
         self._pose_agent._qattention_agents[0]._q.eval()

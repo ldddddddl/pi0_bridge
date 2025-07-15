@@ -98,10 +98,9 @@ def main(config_name: str, max_frames: int | None = None):
         )
 
     # 修改键列表以匹配转换后的键名
-    keys = ['actions', 'state']
+    keys = ["actions", "state"]
     stats = {key: normalize.RunningStats() for key in keys}
     #### tes
-    
 
     for batch in tqdm.tqdm(data_loader, total=num_batches, desc="Computing stats"):
         for key in keys:
@@ -117,10 +116,10 @@ def main(config_name: str, max_frames: int | None = None):
 
 if __name__ == "__main__":
     import sys
-    import os
-    
+
     sys.argv = [
-        sys.argv[0],            # 脚本名
-        "--config-name", "pi0_bridge",  # 第一个位置参数
-    ] 
+        sys.argv[0],  # 脚本名
+        "--config-name",
+        "pi0_bridge",  # 第一个位置参数
+    ]
     tyro.cli(main)

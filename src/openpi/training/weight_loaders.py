@@ -79,7 +79,7 @@ def _merge_params(loaded_params: at.Params, params: at.Params, *, missing_regex:
     Args:
         loaded_params: The parameters to merge.
         params: The reference parameters.
-        missing_regex: A regex pattern for all missing keys that should be merged from 
+        missing_regex: A regex pattern for all missing keys that should be merged from
                        the reference parameters.
 
     Returns:

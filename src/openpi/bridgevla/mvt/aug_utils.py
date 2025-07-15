@@ -1,7 +1,7 @@
 # copy from https://github.com/NVlabs/RVT/blob/master/rvt/mvt/aug_utils.py
-import torch
 import numpy as np
 from scipy.spatial.transform import Rotation
+import torch
 
 
 def rand_dist(size, min=-1.0, max=1.0):
@@ -24,10 +24,10 @@ def sensitive_gimble_fix(euler):
     [b, 3]
     """
     # selecting sensitive angle
-    select1 = (89 < euler[..., 1]) & (euler[..., 1] < 91)
+    select1 = (euler[..., 1] > 89) & (euler[..., 1] < 91)
     euler[select1, 1] = 90
     # selecting sensitive angle
-    select2 = (-91 < euler[..., 1]) & (euler[..., 1] < -89)
+    select2 = (euler[..., 1] > -91) & (euler[..., 1] < -89)
     euler[select2, 1] = -90
 
     # recalulating the euler angles, see assert
@@ -56,7 +56,7 @@ def quaternion_to_discrete_euler(quaternion, resolution, gimble_fix=True):
 
     euler += 180
     assert np.min(euler) >= 0 and np.max(euler) <= 360
-    disc = np.around((euler / resolution)).astype(int)
+    disc = np.around(euler / resolution).astype(int)
     disc[disc == int(360 / resolution)] = 0
     return disc
 
@@ -84,15 +84,11 @@ def discrete_euler_to_quaternion(discrete_euler, resolution):
     return Rotation.from_euler("xyz", euluer, degrees=True).as_quat()
 
 
-def point_to_voxel_index(
-    point: np.ndarray, voxel_size: np.ndarray, coord_bounds: np.ndarray
-):
+def point_to_voxel_index(point: np.ndarray, voxel_size: np.ndarray, coord_bounds: np.ndarray):
     bb_mins = np.array(coord_bounds[0:3])
     bb_maxs = np.array(coord_bounds[3:])
     dims_m_one = np.array([voxel_size] * 3) - 1
     bb_ranges = bb_maxs - bb_mins
     res = bb_ranges / (np.array([voxel_size] * 3) + 1e-12)
-    voxel_indicy = np.minimum(
-        np.floor((point - bb_mins) / (res + 1e-12)).astype(np.int32), dims_m_one
-    )
+    voxel_indicy = np.minimum(np.floor((point - bb_mins) / (res + 1e-12)).astype(np.int32), dims_m_one)
     return voxel_indicy

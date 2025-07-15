@@ -279,6 +279,7 @@ def main(config: _config.TrainConfig):
 if __name__ == "__main__":
     import os
     import sys
+
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
@@ -286,11 +287,13 @@ if __name__ == "__main__":
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
-        sys.argv[0],            # 脚本名
-        "pi0_bridge",       # 第一个位置参数
-        "--exp-name", "pi0_bridge",
+        sys.argv[0],  # 脚本名
+        "pi0_bridge",  # 第一个位置参数
+        "--exp-name",
+        "pi0_bridge",
         "--overwrite",
-        "--data.repo-id", "lddddl/dobot_formate_0611-batch8",
-    ] 
-    
+        "--data.repo-id",
+        "lddddl/dobot_formate_0611-batch8",
+    ]
+
     main(_config.cli())

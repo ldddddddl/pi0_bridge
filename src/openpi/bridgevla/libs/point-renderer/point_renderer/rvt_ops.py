@@ -1,6 +1,6 @@
-from typing import Optional, Tuple
-import torch
 import math
+
+import torch
 
 
 # source: https://discuss.pytorch.org/t/batched-index-select/9115/6
@@ -20,8 +20,8 @@ def batched_index_select(inp, dim, index):
 
 # TODO: break into two functions
 def select_feat_from_hm(
-    pt_cam: torch.Tensor, hm: torch.Tensor, pt_cam_wei: Optional[torch.Tensor] = None
-) -> Tuple[torch.Tensor]:
+    pt_cam: torch.Tensor, hm: torch.Tensor, pt_cam_wei: torch.Tensor | None = None
+) -> tuple[torch.Tensor]:
     """
     :param pt_cam:
         continuous location of point coordinates from where value needs to be
@@ -94,12 +94,9 @@ def select_feat_from_hm(
     return pt_cam_val, pt_cam, pt_cam_wei
 
 
-
-
-
 def select_feat_from_hm_our(
-    pt_cam: torch.Tensor, hm: torch.Tensor, pt_cam_wei: Optional[torch.Tensor] = None
-) -> Tuple[torch.Tensor]:
+    pt_cam: torch.Tensor, hm: torch.Tensor, pt_cam_wei: torch.Tensor | None = None
+) -> tuple[torch.Tensor]:
     """
     :param pt_cam:
         continuous location of point coordinates from where value needs to be

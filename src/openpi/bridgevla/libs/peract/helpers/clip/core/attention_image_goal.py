@@ -1,11 +1,9 @@
 """Attention module."""
 
+from cliport.models.core.attention import Attention
 import numpy as np
 import torch
 import torch.nn.functional as F
-
-
-from cliport.models.core.attention import Attention
 
 
 class AttentionImageGoal(Attention):
@@ -17,12 +15,12 @@ class AttentionImageGoal(Attention):
     def forward(self, inp_img, goal_img, softmax=True):
         """Forward pass."""
         # Input image.
-        in_data = np.pad(inp_img, self.padding, mode='constant')
+        in_data = np.pad(inp_img, self.padding, mode="constant")
         in_shape = (1,) + in_data.shape
         in_data = in_data.reshape(in_shape)
         in_tens = torch.from_numpy(in_data).to(dtype=torch.float, device=self.device)
 
-        goal_tensor = np.pad(goal_img, self.padding, mode='constant')
+        goal_tensor = np.pad(goal_img, self.padding, mode="constant")
         goal_shape = (1,) + goal_tensor.shape
         goal_tensor = goal_tensor.reshape(goal_shape)
         goal_tensor = torch.from_numpy(goal_tensor.copy()).to(dtype=torch.float, device=self.device)
@@ -47,7 +45,7 @@ class AttentionImageGoal(Attention):
         logits = torch.cat(logits, dim=0)
         c0 = self.padding[:2, 0]
         c1 = c0 + inp_img.shape[:2]
-        logits = logits[:, :, c0[0]:c1[0], c0[1]:c1[1]]
+        logits = logits[:, :, c0[0] : c1[0], c0[1] : c1[1]]
 
         logits = logits.permute(1, 2, 3, 0)  # D H W C
         output = logits.reshape(1, np.prod(logits.shape))

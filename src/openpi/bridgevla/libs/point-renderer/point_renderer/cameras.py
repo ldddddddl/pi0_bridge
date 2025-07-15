@@ -1,11 +1,13 @@
-import torch
+from functools import lru_cache
 
 from point_renderer import ops
-from functools import lru_cache
+import torch
+
 
 @lru_cache(maxsize=32)
 def linalg_inv(poses):
     return torch.linalg.inv(poses)
+
 
 class Cameras:
     def __init__(self, poses, intrinsics, img_size, inv_poses=None):
@@ -67,6 +69,7 @@ class PerspectiveCameras(Cameras):
     def is_perspective(self):
         return True
 
+
 class OrthographicCameras(Cameras):
     def __init__(self, poses, intrinsics, img_size, inv_poses=None):
         super().__init__(poses, intrinsics, img_size, inv_poses)
@@ -110,7 +113,6 @@ class OrthographicCameras(Cameras):
         return OrthographicCameras(cam_poses, intrinsics, img_size_px)
 
     def to(self, device):
-        
         return OrthographicCameras(self.poses.to(device), self.intrinsics.to(device), self.inv_poses.to(device))
 
     def is_orthographic(self):

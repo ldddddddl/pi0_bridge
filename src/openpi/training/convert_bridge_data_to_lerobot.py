@@ -17,19 +17,18 @@ uv run examples/bridge/convert_bridge_data_to_lerobot.py --data_dir /path/to/you
 运行本转换脚本大约需要 30 分钟。
 """
 
-import shutil
 import os
 from pathlib import Path
-import numpy as np
 import pickle
-from scipy.spatial.transform import Rotation as R
-from tqdm import tqdm
-import cv2
+import shutil
+
 from einops import rearrange
-from huggingface_hub import login
 
 # from lerobot.common.datasets.lerobot_dataset import LEROBOT_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from tqdm import tqdm
 import tyro
 
 # os.environ["http_proxy"] = "http://localhost:10808"
@@ -43,39 +42,40 @@ REPO_NAME = "lddddl/dobot_formate_0611"  # 数据集名称
 OUTPUT_PATH = os.path.join(HOME, "pi0_bridge/datasets/converted_dataset")  # 输出目录
 DATASET_PATH = os.path.join(HOME, "pi0_bridge/datasets/dobot_formate_0611")
 
+
 def read_action_file(action_path):
-    '''
+    """
     文件内容类似如下
     Timestamp Position (X, Y, Z) Orientation (Rx, Ry, Rz) Claw Status
     2025-04-27_15-34-33-519 166.5982 -165.0889 168.8611 88.0599 -2.6958 -90.3270
     2025-04-27_15-34-58-985 126.8121 -441.9641 60.3471 91.3858 -4.3865 -48.2481
-    '''
+    """
     with open(action_path, "rb") as f:
         data_str = pickle.load(f)
-    
+
     # Split the string into lines
-    lines = data_str.strip().split('\n')
-    
+    lines = data_str.strip().split("\n")
+
     # Initialize the result list
     result = []
-    
+
     # Process each line of data
     for i, line in enumerate(lines):
         if i == 0:  # Skip header
             continue
-            
+
         # Split the line into components
         parts = line.strip().split()
-        
+
         # Extract timestamp
         timestamp = parts[0]
-        
+
         # Extract position (X,Y,Z)
         position = [float(x) for x in parts[1:4]]
-        
+
         # Extract orientation (Rx,Ry,Rz)
         orientation = [float(x) for x in parts[4:7]]
-        
+
         if len(parts) == 9:
             claw_status = int(parts[7])
             arm_flag = int(parts[8])
@@ -83,36 +83,38 @@ def read_action_file(action_path):
             claw_status = int(parts[7])
             arm_flag = 0
         else:
-            if i == 1 or i == 2 or i ==5:
+            if i == 1 or i == 2 or i == 5:
                 claw_status = 0
             else:
                 claw_status = 1
             arm_flag = 0
-        
+
         # Create dictionary for this entry
         entry = {
-            'timestamp': timestamp,
-            'position': position,
-            'orientation': orientation,
-            'claw_status': claw_status,
-            'arm_flag': arm_flag,
+            "timestamp": timestamp,
+            "position": position,
+            "orientation": orientation,
+            "claw_status": claw_status,
+            "arm_flag": arm_flag,
         }
-        
+
         result.append(entry)
-    
+
     return result
+
 
 def convert_pcd_to_base(extrinsic_path, pcd, type="3rd"):
     with open(extrinsic_path, "rb") as f:
         data = pickle.load(f)
         transform = np.array(data)
-    
+
     h, w = pcd.shape[:2]
     pcd = pcd.reshape(-1, 3)
     pcd = np.concatenate((pcd, np.ones((pcd.shape[0], 1))), axis=1)
     pcd = (transform @ pcd.T).T[:, :3]
     pcd = pcd.reshape(h, w, 3)
     return pcd
+
 
 def downsample_nn(img, out_h=224, out_w=224):
     """下采样图像到指定大小。
@@ -128,8 +130,9 @@ def downsample_nn(img, out_h=224, out_w=224):
     row_idx = (np.linspace(0, h - 1, out_h)).astype(np.int64)
     col_idx = (np.linspace(0, w - 1, out_w)).astype(np.int64)
     # 使用meshgrid创建索引网格
-    row_idx, col_idx = np.meshgrid(row_idx, col_idx, indexing='ij')
+    row_idx, col_idx = np.meshgrid(row_idx, col_idx, indexing="ij")
     return img[:, row_idx, col_idx]
+
 
 def process_image(img_data):
     """处理图像数据到正确的格式。
@@ -149,10 +152,11 @@ def process_image(img_data):
         else:
             img = img.astype(np.uint8)
     # HWC -> CHW
-    img = rearrange(img, 'h w c -> c h w')
+    img = rearrange(img, "h w c -> c h w")
     # 下采样到256x256
     img = downsample_nn(img, out_h=256, out_w=256)
     return img
+
 
 def process_pcd(pcd_data, extrinsic_path):
     """处理点云数据到正确的格式。
@@ -167,12 +171,13 @@ def process_pcd(pcd_data, extrinsic_path):
     # 转换坐标系
     pcd = convert_pcd_to_base(pcd=pcd, extrinsic_path=extrinsic_path)
     # HWC -> CHW
-    pcd = rearrange(pcd, 'h w c -> c h w')
+    pcd = rearrange(pcd, "h w c -> c h w")
     # 下采样到256x256
     pcd = downsample_nn(pcd, out_h=256, out_w=256)
     # 归一化到[0, 1]范围
     pcd = (pcd - pcd.min()) / (pcd.max() - pcd.min())
     return pcd.astype(np.float32)
+
 
 def main(data_dir: str, *, push_to_hub: bool = False):
     # 如果需要推送到 Hub，先进行登录
@@ -188,7 +193,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
     output_path = os.path.join(OUTPUT_PATH, REPO_NAME)
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    
+
     # 确保输出目录的父目录存在
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -248,47 +253,42 @@ def main(data_dir: str, *, push_to_hub: bool = False):
         task_path = os.path.join(data_dir, task)
         if not os.path.isdir(task_path):
             continue
-            
+
         for episode_num in tqdm(os.listdir(task_path)):
             episode_path = os.path.join(task_path, episode_num)
-            
-            action_path = os.path.join(episode_path, 'pose.pkl')
+
+            action_path = os.path.join(episode_path, "pose.pkl")
             rgb_3rd = os.path.join(episode_path, "zed_rgb")
             pcd_3rd = os.path.join(episode_path, "zed_pcd")
             gripper_pose = read_action_file(action_path)
 
-            num_steps = sum(1 for file_name in os.listdir(rgb_3rd) if file_name.endswith('.pkl'))
-            
+            num_steps = sum(1 for file_name in os.listdir(rgb_3rd) if file_name.endswith(".pkl"))
+
             # 读取指令
-            with open(os.path.join(episode_path, f"instruction.pkl"), 'rb') as f:
+            with open(os.path.join(episode_path, "instruction.pkl"), "rb") as f:
                 instruction = pickle.load(f)
 
-            for step in range(num_steps-1):
+            for step in range(num_steps - 1):
                 # 处理gripper pose
-                gripper_pose_xyz = np.array(gripper_pose[step+1]["position"])/1000  # mm -> m
-                gripper_pose_euler = gripper_pose[step+1]["orientation"]
-                gripper_pose_quat = R.from_euler('xyz', gripper_pose_euler, degrees=True).as_quat()
-                gripper_pose_full = np.concatenate((
-                    gripper_pose_xyz, 
-                    gripper_pose_quat,
-                    [gripper_pose[step+1]["claw_status"]]
-                ), axis=0).astype(np.float32)
+                gripper_pose_xyz = np.array(gripper_pose[step + 1]["position"]) / 1000  # mm -> m
+                gripper_pose_euler = gripper_pose[step + 1]["orientation"]
+                gripper_pose_quat = R.from_euler("xyz", gripper_pose_euler, degrees=True).as_quat()
+                gripper_pose_full = np.concatenate(
+                    (gripper_pose_xyz, gripper_pose_quat, [gripper_pose[step + 1]["claw_status"]]), axis=0
+                ).astype(np.float32)
 
                 # 处理low_dim_state
                 current_gripper_state = gripper_pose[step]["claw_status"]
-                time = (1. - (step / float(num_steps - 1))) * 2. - 1.
+                time = (1.0 - (step / float(num_steps - 1))) * 2.0 - 1.0
                 low_dim_state = np.array([current_gripper_state, time], dtype=np.float32)
 
                 # 读取并处理RGB图像
-                with open(os.path.join(rgb_3rd, f"{step}.pkl"), 'rb') as f:
+                with open(os.path.join(rgb_3rd, f"{step}.pkl"), "rb") as f:
                     rgb = process_image(pickle.load(f))
 
                 # 读取并处理点云数据
-                with open(os.path.join(pcd_3rd, f"{step}.pkl"), 'rb') as f:
-                    pcd = process_pcd(
-                        pickle.load(f),
-                        extrinsic_path=os.path.join(episode_path, "extrinsic_matrix.pkl")
-                    )
+                with open(os.path.join(pcd_3rd, f"{step}.pkl"), "rb") as f:
+                    pcd = process_pcd(pickle.load(f), extrinsic_path=os.path.join(episode_path, "extrinsic_matrix.pkl"))
 
                 # 生成随机动作
                 # action = np.random.rand(8).astype(np.float32)
@@ -296,17 +296,19 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                 # gripper_pose_full = np.random.rand(8).astype(np.float32)
 
                 # 添加帧到数据集
-                dataset.add_frame({
-                    "top_image": rgb,
-                    "front_image": rgb,
-                    "right_image": rgb,
-                    "pcd": pcd,
-                    # "gripper_pose": gripper_pose_full,
-                    "low_dim_state": low_dim_state,
-                    "lang_goal": instruction.strip(),
-                    "action": gripper_pose_full,
-                    "task": task,  
-                })
+                dataset.add_frame(
+                    {
+                        "top_image": rgb,
+                        "front_image": rgb,
+                        "right_image": rgb,
+                        "pcd": pcd,
+                        # "gripper_pose": gripper_pose_full,
+                        "low_dim_state": low_dim_state,
+                        "lang_goal": instruction.strip(),
+                        "action": gripper_pose_full,
+                        "task": task,
+                    }
+                )
 
             dataset.save_episode()
 
@@ -319,12 +321,14 @@ def main(data_dir: str, *, push_to_hub: bool = False):
             license="apache-2.0",
         )
 
+
 if __name__ == "__main__":
     import sys
-    sys.argv = [
-        sys.argv[0],            # 脚本名
-        "--data_dir", os.path.join(HOME, "pi0_bridge/datasets/dobot_formate_0611"),  # 数据目录
-        "--push_to_hub"
-    ] 
-    tyro.cli(main)
 
+    sys.argv = [
+        sys.argv[0],  # 脚本名
+        "--data_dir",
+        os.path.join(HOME, "pi0_bridge/datasets/dobot_formate_0611"),  # 数据目录
+        "--push_to_hub",
+    ]
+    tyro.cli(main)
