@@ -243,15 +243,15 @@ def valid_step(
     def loss_fn(
         model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
     ):
-        chunked_loss, mse_loss_in, mse_loss_out = model.compute_loss(rng, observation, actions, train=True)
-        total_loss = jnp.mean(chunked_loss) + mse_loss_in + mse_loss_out
+        chunked_loss = model.compute_loss(rng, observation, actions, train=True)
+        total_loss = jnp.mean(chunked_loss)
         # 用 stop_gradient + float() 保证副产物为Python标量，避免nnx.value_and_grad报错
-        return total_loss, mse_loss_in, mse_loss_out
+        return total_loss
 
     # mse_loss_in, mse_loss_out = model.get_mse_loss()
     valid_rng = jax.random.fold_in(rng, state.step)
     observation, actions = batch
-    loss, mse_loss_in, mse_loss_out = loss_fn(model, valid_rng, observation, actions)
+    loss = loss_fn(model, valid_rng, observation, actions)
     # 这里只返回loss，后续可扩展更多指标
     info = {"valid_total_loss": loss, 
             # "valid_mse_loss_in": mse_loss_in, 

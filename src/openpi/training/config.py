@@ -408,12 +408,12 @@ class TrainConfig:
     # 但会增加内存和 CPU 使用率。
     num_workers: int = 2
     # 要运行的训练步骤（批次）数
-    num_train_steps: int = 30_000
+    num_train_steps: int = 3_000
 
     # 记录训练指标的频率（以步骤为单位）
     log_interval: int = 1
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 100
+    save_interval: int = 1000
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
     keep_period: int | None = 5000
 
@@ -592,7 +592,7 @@ _CONFIGS = [
         # 在下面，您可以定义其他超参数，例如学习率、训练步骤等。
         # 查看基础 TrainConfig 类获取可用超参数的完整列表。
         # num_train_steps=30_000,
-        num_train_steps=200,
+        # num_train_steps=200,
         # batch_size=1,
     ),
     TrainConfig(

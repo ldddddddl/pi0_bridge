@@ -72,6 +72,13 @@ class PaliGemmaWeightLoader(WeightLoader):
         # Add all missing weights.
         return _merge_params(loaded_params, params, missing_regex=".*")
 
+# convert dict keys to str
+def dict_keys_to_str(d):
+    if isinstance(d, dict):
+        return {str(k): dict_keys_to_str(v) for k, v in d.items()}
+    else:
+        return d
+
 
 def _merge_params(loaded_params: at.Params, params: at.Params, *, missing_regex: str) -> at.Params:
     """Merges the loaded parameters with the reference parameters.
@@ -85,6 +92,9 @@ def _merge_params(loaded_params: at.Params, params: at.Params, *, missing_regex:
     Returns:
         A new dictionary with the merged parameters.
     """
+    params = dict_keys_to_str(params)
+    loaded_params = dict_keys_to_str(loaded_params)
+    
     flat_ref = flax.traverse_util.flatten_dict(params, sep="/")
     flat_loaded = flax.traverse_util.flatten_dict(loaded_params, sep="/")
 
