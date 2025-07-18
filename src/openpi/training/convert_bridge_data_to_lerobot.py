@@ -31,8 +31,8 @@ from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 import tyro
 
-# os.environ["http_proxy"] = "http://localhost:10808"
-# os.environ["https_proxy"] = "http://localhost:10808"
+os.environ["http_proxy"] = "http://localhost:10808"
+os.environ["https_proxy"] = "http://localhost:10808"
 
 
 # 使用用户主目录下的路径
@@ -179,15 +179,18 @@ def process_pcd(pcd_data, extrinsic_path):
     return pcd.astype(np.float32)
 
 
+def get_gripper_pos(gripper_pose, step):
+    
+    gripper_pose_xyz = np.array(gripper_pose[step]["position"]) / 1000  # mm -> m
+    gripper_pose_euler = gripper_pose[step]["orientation"]
+    gripper_pose_quat = R.from_euler("xyz", gripper_pose_euler, degrees=True).as_quat()
+    gripper_pose_full = np.concatenate(
+        (gripper_pose_xyz, gripper_pose_quat, [gripper_pose[step]["claw_status"]]), axis=0
+    ).astype(np.float32)
+
+    return gripper_pose_full
+
 def main(data_dir: str, *, push_to_hub: bool = False):
-    # 如果需要推送到 Hub，先进行登录
-    # if push_to_hub:
-    #     try:
-    #         login()  # 这将提示用户输入token
-    #     except Exception as e:
-    #         print(f"登录到 Hugging Face Hub 失败: {e}")
-    #         print("请确保您已经运行过 `huggingface-cli login` 或在环境变量中设置了 HUGGINGFACE_TOKEN")
-    #         return
 
     # 清理输出目录中已存在的数据集
     output_path = os.path.join(OUTPUT_PATH, REPO_NAME)
@@ -223,12 +226,12 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                 "shape": (3, 256, 256),
                 "names": ["channel", "height", "width"],
             },
-            "gripper_pose": {
-                "dtype": "float32",
-                "shape": (8,),  # position(3) + quaternion(4) + claw_status(1)
-                "names": ["pose"],
-            },
-            "low_dim_state": {
+            # "gripper_pose": {
+            #     "dtype": "float32",
+            #     "shape": (8,),  # position(3) + quaternion(4) + claw_status(1)
+            #     "names": ["pose"],
+            # },
+            "state": {
                 "dtype": "float32",
                 "shape": (8,),  # current_gripper_state(1) + time(1)
                 "names": ["state"],
@@ -238,11 +241,11 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                 "shape": (1,),
                 "names": ["instruction"],
             },
-            # "action": {
-            #     "dtype": "float32",
-            #     "shape": (8,),
-            #     "names": ["action"],
-            # },
+            "action": {
+                "dtype": "float32",
+                "shape": (8,),
+                "names": ["action"],
+            },
         },
         image_writer_threads=10,
         image_writer_processes=5,
@@ -270,12 +273,8 @@ def main(data_dir: str, *, push_to_hub: bool = False):
 
             for step in range(num_steps - 1):
                 # 处理gripper pose
-                gripper_pose_xyz = np.array(gripper_pose[step + 1]["position"]) / 1000  # mm -> m
-                gripper_pose_euler = gripper_pose[step + 1]["orientation"]
-                gripper_pose_quat = R.from_euler("xyz", gripper_pose_euler, degrees=True).as_quat()
-                gripper_pose_full = np.concatenate(
-                    (gripper_pose_xyz, gripper_pose_quat, [gripper_pose[step + 1]["claw_status"]]), axis=0
-                ).astype(np.float32)
+                state = get_gripper_pos(gripper_pose=gripper_pose, step=step)
+                gripper_pose_full = get_gripper_pos(gripper_pose=gripper_pose, step=step+1)
 
                 # 处理low_dim_state
                 current_gripper_state = gripper_pose[step]["claw_status"]
@@ -290,11 +289,6 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                 with open(os.path.join(pcd_3rd, f"{step}.pkl"), "rb") as f:
                     pcd = process_pcd(pickle.load(f), extrinsic_path=os.path.join(episode_path, "extrinsic_matrix.pkl"))
 
-                # 生成随机动作
-                # action = np.random.rand(8).astype(np.float32)
-                low_dim_state = np.random.rand(8).astype(np.float32)
-                # gripper_pose_full = np.random.rand(8).astype(np.float32)
-
                 # 添加帧到数据集
                 dataset.add_frame(
                     {
@@ -303,7 +297,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                         "right_image": rgb,
                         "pcd": pcd,
                         # "gripper_pose": gripper_pose_full,
-                        "low_dim_state": low_dim_state,
+                        "state": state,
                         "lang_goal": instruction.strip(),
                         "action": gripper_pose_full,
                         "task": task,
@@ -328,7 +322,7 @@ if __name__ == "__main__":
     sys.argv = [
         sys.argv[0],  # 脚本名
         "--data_dir",
-        os.path.join(HOME, "pi0_bridge/datasets/dobot_formate_0611"),  # 数据目录
-        "--push_to_hub",
+        os.path.join(HOME, "vla/pi0_bridge/datasets/dobot_formate_0611"),  # 数据目录
+        # "--push_to_hub",
     ]
     tyro.cli(main)

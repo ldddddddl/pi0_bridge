@@ -8,6 +8,7 @@ import jax
 from jax import config
 import jax.numpy as jnp
 from typing_extensions import override
+import optax
 
 from openpi.models import model as _model
 import openpi.models.gemma as _gemma
@@ -257,22 +258,26 @@ class Pi0(_model.BaseModel):
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
-        return tokens, input_mask, ar_mask
+        return tokens, input_mask, ar_mask  
 
     @override
     def compute_loss(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
     ) -> at.Float[at.Array, "*b ah"]:
+        # when output_format == endpos, then action = endpos, else action = joint action
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
         # observation augmentations
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
-
         batch_shape = actions.shape[:-2]
-        noise = jax.random.normal(noise_rng, actions.shape)
-        time = jax.random.beta(time_rng, 1.5, 1, batch_shape) * 0.999 + 0.001
-        time_expanded = time[..., None, None]
-        x_t = time_expanded * noise + (1 - time_expanded) * actions
-        u_t = noise - actions
+        if not self.output_format == "end_pos":
+            noise = jax.random.normal(noise_rng, actions.shape)
+            time = jax.random.beta(time_rng, 1.5, 1, batch_shape) * 0.999 + 0.001
+            time_expanded = time[..., None, None]
+            x_t = time_expanded * noise + (1 - time_expanded) * actions
+            u_t = noise - actions
+        else:
+            time = jax.random.beta(time_rng, 1.5, 1, batch_shape) * 0.999 + 0.001
+            x_t = observation.state[:, None, :]
 
         # 一次性完成前缀+后缀的前向传播
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
@@ -289,9 +294,12 @@ class Pi0(_model.BaseModel):
         # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
         if self.output_format == "end_pos":
             v_t_endpos = self.joint2endpos_head(v_t)
-            v_t = v_t_endpos
-
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
+            # v_t = v_t_endpos
+            loss = jnp.mean(optax.l2_loss(actions - v_t_endpos))
+        else:
+            loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        
+        return loss 
 
     @override
     def action2endpos(self, actions: _model.Actions) -> at.Float[at.Array, "*b ah ed"]:
@@ -348,15 +356,16 @@ class Pi0(_model.BaseModel):
             # 如果输出格式为end_pos，则需要将joint_pos转换为end_pos
             if self.output_format == "end_pos":
                 v_t_endpos = self.joint2endpos_head(v_t)
-                v_t = v_t_endpos
-
-            return x_t + dt * v_t, time + dt
+                return v_t_endpos
+            else:
+                return x_t + dt * v_t, time + dt
 
         def cond(carry):
             x_t, time = carry
             # 对浮点误差具有鲁棒性
             return time >= -dt / 2
-
+        if self.output_format == 'end_pos':
+            x_0 = step((observation.state, 1.0))
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
 
         return x_0

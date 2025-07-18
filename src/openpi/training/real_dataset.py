@@ -343,7 +343,7 @@ def is_bgr_image(arr):
 
 if __name__ == "__main__":
     dataset = Real_Dataset(
-        data_path="/home/ldl/vla/openpi/datasets/dobot_formate_0611", device="cuda:0", cameras="3rd", ep_per_task=3
+        data_path="/home/lpy/vla/pi0_bridge/datasets/dobot_formate_0611", device="cuda:0", cameras="3rd", ep_per_task=3
     )
     print("total samples:", len(dataset))
     for data in dataset:

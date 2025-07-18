@@ -269,7 +269,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
                         "observation/image": "front_image",
                         "observation/wrist_image": "top_image",
                         "observation/right_image": "right_image",
-                        "observation/state": "low_dim_state",
+                        "observation/state": "state",
                         # "observation/gripper_pose": "gripper_pose",
                         "actions": "action",
                         "prompt": "lang_goal",
@@ -441,7 +441,7 @@ class TrainConfig:
     # 验证集比例
     valid_data_size: float = 0.2
     # 验证间隔
-    valid_interval: int = 1
+    valid_interval: int = 50
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -571,7 +571,7 @@ _CONFIGS = [
         # 并执行*完整*微调。在下面的示例中，我们展示如何修改此配置
         # 以执行*低内存*（LORA）微调，并使用 pi0-FAST 作为替代架构。
         # max_token_len 一个好的经验法则是单臂机器人使用约 180，双臂机器人使用约 250。
-        model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=50, max_token_len=180),
+        model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=1, max_token_len=180),
         # 定义您要训练的数据集。在此示例中，我们使用 Libero 数据集。
         # 对于您自己的数据集，您可以更改 repo_id 以指向您的数据集。
         # 同时修改 DataConfig 以使用您在上面为您的数据集创建的新配置。
@@ -582,7 +582,7 @@ _CONFIGS = [
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                root="~/pi0_bridge/datasets/dobot_formate_0611",
+                # root="./pi0_bridge/datasets/dobot_formate_0611",
             ),
         ),
         # 定义要加载哪个预训练检查点来初始化模型。

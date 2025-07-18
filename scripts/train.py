@@ -3,6 +3,7 @@ import functools
 import logging
 import platform
 from typing import Any
+import datetime
 
 import etils.epath as epath
 import flax.nnx as nnx
@@ -61,12 +62,11 @@ def init_logging():
 
 
 def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = False, enabled: bool = True):
-    if not enabled:
-        import datetime
+    ct = datetime.datetime.now()
+    strf_time = ct.strftime("%Y-%m-%d-%H-%M-%S")
 
-        ct = datetime.datetime.now()
-        strf_time = ct.strftime("%Y-%m-%d-%H-%M-%S")
-        wandb.init(mode="disabled", name=f"{strf_time}")
+    if not enabled:
+        wandb.init(mode="disabled")
         return
 
     ckpt_dir = config.checkpoint_dir
@@ -77,7 +77,7 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
         wandb.init(id=run_id, resume="must", project=config.project_name)
     else:
         wandb.init(
-            name=config.exp_name,
+            name=config.exp_name+strf_time,
             config=dataclasses.asdict(config),
             project=config.project_name,
         )
@@ -273,7 +273,7 @@ def main(config: _config.TrainConfig):
 
     rng = jax.random.key(config.seed)
     train_rng, init_rng = jax.random.split(rng)
-
+    # 确认
     mesh = sharding.make_mesh(config.fsdp_devices)
     data_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(sharding.DATA_AXIS))
     replicated_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
@@ -358,6 +358,7 @@ def main(config: _config.TrainConfig):
     )
 
     infos = []
+    valid_infos = []
     for step in pbar:
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
@@ -399,7 +400,7 @@ if __name__ == "__main__":
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "6, 7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "5, 6"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
