@@ -323,6 +323,6 @@ if __name__ == "__main__":
         sys.argv[0],  # 脚本名
         "--data_dir",
         os.path.join(HOME, "vla/pi0_bridge/datasets/dobot_formate_0611"),  # 数据目录
-        # "--push_to_hub",
+        "--push_to_hub",
     ]
     tyro.cli(main)
