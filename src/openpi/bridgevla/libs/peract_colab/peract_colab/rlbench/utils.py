@@ -9,7 +9,7 @@ from PIL import Image
 from .backend.utils import image_to_float_array
 
 os.environ["LD_LIBRARY_PATH"] = "/home/ldl/CoppeliaSim:" + os.environ.get("LD_LIBRARY_PATH", "")
-from pyrep.objects import VisionSensor
+from ..pyrep.objects import VisionSensor
 
 # constants
 EPISODE_FOLDER = "episode%d"

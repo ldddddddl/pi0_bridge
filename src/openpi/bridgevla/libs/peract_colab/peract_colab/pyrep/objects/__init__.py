@@ -1,1 +1,1 @@
-from pyrep.objects.vision_sensor import VisionSensor
+from ...pyrep.objects.vision_sensor import VisionSensor

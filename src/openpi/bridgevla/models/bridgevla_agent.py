@@ -30,15 +30,15 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 sys.path.append(os.path.join(os.path.dirname(__file__), "..."))
 import os
 
-from bridgevla.mvt.augmentation import apply_se3_aug_con
-from bridgevla.mvt.augmentation import aug_utils
-import bridgevla.mvt.utils as mvt_utils
-import bridgevla.utils.rvt_utils as rvt_utils
-import GemBench.utils.peract_utils_gembench as gembench_utils
+from ..mvt.augmentation import apply_se3_aug_con
+from ..mvt.augmentation import aug_utils
+from ..mvt import utils as mvt_utils
+from ..utils import rvt_utils
+from ..GemBench.utils import peract_utils_gembench as gembench_utils
 from PIL import Image
 from PIL import ImageDraw
-import Real.utils.peract_utils as real_utils
-import RLBench.utils.peract_utils_rlbench as rlbench_utils
+from ..Real.utils import peract_utils as real_utils
+from ..RLBench.utils import peract_utils_rlbench as rlbench_utils
 
 from ..libs.YARR.yarr.agents.agent import ActResult
 

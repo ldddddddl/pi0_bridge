@@ -1,0 +1,13 @@
+exp_id: ours_gembench
+tasks: all
+bs: 4
+num_workers: 3
+epochs: 100
+peract:
+  lr: 8e-5
+  transform_augmentation_xyz: [0.125, 0.125, 0.125]
+  transform_augmentation_rpy: [0.0, 0.0, 45.0]
+  lambda_weight_l2: 1e-4
+rvt:
+  place_with_mean: False
+  img_aug: 0.0

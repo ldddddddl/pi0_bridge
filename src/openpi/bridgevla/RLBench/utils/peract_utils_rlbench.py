@@ -6,11 +6,11 @@ from ...models.peract_official import create_agent_our
 
 CAMERAS = ["front", "left_shoulder", "right_shoulder", "wrist"]
 SCENE_BOUNDS = [
-    -0.3,
-    -0.5,
-    0.6,
-    0.7,
-    0.5,
+    -1.3,
+    -1.5,
+    1.6,
+    1.7,
+    1.5,
     1.6,
 ]  # [x_min, y_min, z_min, x_max, y_max, z_max] - the metric volume to be voxelized
 IMAGE_SIZE = 128

@@ -23,7 +23,7 @@ class PrioritizedReplayBuffer(UniformReplayBuffer):
         super(PrioritizedReplayBuffer, self).__init__(*args, **kwargs)
         self._sum_tree = SumTree(self._replay_capacity)
 
-    def get_storage_signature(self) -> Tuple[List[ReplayElement], List[ReplayElement]]:
+    def get_storage_signature(self) -> tuple[list[ReplayElement], list[ReplayElement]]:
         """Returns a default list of elements to be stored in this replay memory.
 
         Note - Derived classes may return a different signature.
