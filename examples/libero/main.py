@@ -1,3 +1,12 @@
+import os
+import sys
+
+# 自动将 third_party/libero 加入 sys.path，确保可以 import libero.libero
+libero_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "third_party", "libero"))
+if libero_root not in sys.path:
+    sys.path.insert(0, libero_root)
+
+
 import collections
 import dataclasses
 import logging
@@ -169,7 +178,7 @@ def eval_libero(args: Args) -> None:
                 except Exception as e:
                     logging.error(f"Caught exception: {e}")
                     break
-
+                # breakpoint()
             task_episodes += 1
             total_episodes += 1
 

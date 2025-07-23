@@ -64,8 +64,8 @@ class AlohaInputs(transforms.DataTransformFn):
 
         # Add the extra images.
         extra_image_names = {
-            "left_wrist_0_rgb": "cam_left_wrist",
-            "right_wrist_0_rgb": "cam_right_wrist",
+            # "left_wrist_0_rgb": "cam_left_wrist",
+            # "right_wrist_0_rgb": "cam_right_wrist",
         }
         for dest, source in extra_image_names.items():
             if source in in_images:

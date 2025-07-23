@@ -400,7 +400,7 @@ if __name__ == "__main__":
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "5, 6"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "4, 5, 6, 7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
@@ -410,7 +410,7 @@ if __name__ == "__main__":
         "pi0_bridge",
         "--overwrite",
         "--data.repo-id",
-        "lddddl/dobot_formate_0611",
+        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013",
     ]
 
     main(_config.cli())

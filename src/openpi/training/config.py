@@ -90,6 +90,7 @@ class DataConfig:
     action_space: droid_rlds_dataset.DroidActionSpace | None = None
 
 
+
 class GroupFactory(Protocol):
     def __call__(self, model_config: _model.BaseModelConfig) -> _transforms.Group:
         """创建一个转换组。"""
@@ -212,7 +213,7 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "images": {"cam_high": "observation.images.top"},
+                        "images": {"cam_high": "top_image"},
                         "state": "observation.state",
                         "actions": "action",
                     }
@@ -266,9 +267,9 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "observation/image": "front_image",
-                        "observation/wrist_image": "top_image",
-                        "observation/right_image": "right_image",
+                        "observation/image": "top_image",
+                        # "observation/wrist_image": "front_image",
+                        # "observation/right_image": "right_image",
                         "observation/state": "state",
                         # "observation/gripper_pose": "gripper_pose",
                         "actions": "action",
@@ -408,12 +409,12 @@ class TrainConfig:
     # 但会增加内存和 CPU 使用率。
     num_workers: int = 2
     # 要运行的训练步骤（批次）数
-    num_train_steps: int = 3_000
+    num_train_steps: int = 30_000
 
     # 记录训练指标的频率（以步骤为单位）
-    log_interval: int = 1
+    log_interval: int = 100
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 1000
+    save_interval: int = 10000
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
     keep_period: int | None = 5000
 
@@ -432,7 +433,7 @@ class TrainConfig:
     # 但训练可能会变慢。
     # 例如，如果总设备数为 4，fsdp 设备数为 2；那么模型将被分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
-    fsdp_devices: int = 1
+    fsdp_devices: int = 2
 
     # 末端位置维度
     end_pos_dim: int = 8
@@ -441,7 +442,9 @@ class TrainConfig:
     # 验证集比例
     valid_data_size: float = 0.2
     # 验证间隔
-    valid_interval: int = 50
+    valid_interval: int = 100        
+    # device id 
+    device: str = "7"
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -557,6 +560,36 @@ _CONFIGS = [
         # 查看基础 TrainConfig 类获取可用超参数的完整列表。
         num_train_steps=30_000,
     ),
+    TrainConfig(
+        name="pi0_bridge_single",
+        model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=1, max_token_len=180),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/dobot_formate_0611",
+            # assets=AssetsConfig(
+            #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+            #     asset_id="trossen",
+            # ),
+            default_prompt="uncap the pen",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "top_image",
+                            },
+                            "state": "state",
+                            "actions": "action",
+                            "prompt": "lang_goal",
+                            
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        # num_train_steps=20_000,
+    ),
+    
     #
     # Bridge 微调配置。
     #
@@ -576,13 +609,14 @@ _CONFIGS = [
         # 对于您自己的数据集，您可以更改 repo_id 以指向您的数据集。
         # 同时修改 DataConfig 以使用您在上面为您的数据集创建的新配置。
         data=LeRobotLiberoDataConfig(
-            repo_id="lddddl/dobot_formate_0611",
-            # repo_id=None,
+            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013",
+            # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                # root="./pi0_bridge/datasets/dobot_formate_0611",
+                root='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
+                repo_id='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
             ),
         ),
         # 定义要加载哪个预训练检查点来初始化模型。

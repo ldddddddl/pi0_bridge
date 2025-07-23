@@ -47,18 +47,21 @@ os.environ["https_proxy"] = "http://localhost:10808"
 # 使用用户主目录下的路径
 HOME = str(Path.home())
 os.environ["LEROBOT_HOME"] = os.path.join(HOME, "pi0_bridge/datasets")
-REPO_NAME = "lddddl/dobot_formate_0611"  # 数据集名称
-OUTPUT_PATH = os.path.join(HOME, "pi0_bridge/datasets/converted_dataset")  # 输出目录
-DATASET_PATH = os.path.join(HOME, "pi0_bridge/datasets/dobot_formate_0611")
-SCENE_BOUNDS_REAL  = [
-    -0.7,
-    -0.9,
-    -0.5,
-    0.7,
-    0.7,
-    1.3,
+# REPO_NAME = "lddddl/dobot_formate_0611"  # 数据集名称
+REPO_NAME = None    
+OUTPUT_PATH = os.path.join(HOME, "vla/pi0_bridge/datasets/converted_dataset")  # 输出目录
+# DATASET_PATH = os.path.join(HOME, '/home/BridgeVLA/data/202507013')
+SCENE_BOUNDS_REAL = [
+    -1.1,
+    -0.6,
+    -0.2,
+    0.2,
+    0.5,
+    0.6,
 ]
 PLACE_WITH_MEAN = True
+
+PCD2RGB = False
 
 def read_action_file(action_path):
     """
@@ -334,8 +337,9 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
     image_channel = 3
     dyn_cam_info = None 
     mvt_cfg = mvt_config.get_cfg_defaults()
+    dataset_name = data_dir.split('/')[-1]
     # 清理输出目录中已存在的数据集
-    output_path = os.path.join(OUTPUT_PATH, REPO_NAME)
+    output_path = os.path.join(OUTPUT_PATH, REPO_NAME if REPO_NAME is not None else dataset_name)
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
 
@@ -353,16 +357,16 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
                 "shape": (image_channel, image_size, image_size),
                 "names": ["channel", "height", "width"],
             },
-            "front_image": {
-                "dtype": "image",
-                "shape": (image_channel, image_size, image_size),
-                "names": ["channel", "height", "width"],
-            },
-            "right_image": {
-                "dtype": "image",
-                "shape": (image_channel, image_size, image_size),
-                "names": ["channel", "height", "width"],
-            },
+            # "front_image": {
+            #     "dtype": "image",
+            #     "shape": (image_channel, image_size, image_size),
+            #     "names": ["channel", "height", "width"],
+            # },
+            # "right_image": {
+            #     "dtype": "image",
+            #     "shape": (image_channel, image_size, image_size),
+            #     "names": ["channel", "height", "width"],
+            # },
             "pcd": {
                 "dtype": "float32",
                 "shape": (image_channel, image_size, image_size),
@@ -438,67 +442,83 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
                 with open(os.path.join(pcd_3rd, f"{step}.pkl"), "rb") as f:
                     pcd = process_pcd(pickle.load(f), extrinsic_path=os.path.join(episode_path, "extrinsic_matrix.pkl"))
 
-
-                # convert point cloud to img
-                obs_dict = {
-                    '3rd':{
-                        'pcd':torch.from_numpy(pcd[None, ...]).to(device),
-                        'rgb':torch.from_numpy(rgb[None, ...]).to(device)
+                if PCD2RGB:
+                    # convert point cloud to img
+                    obs_dict = {
+                        '3rd':{
+                            'pcd':torch.from_numpy(pcd[None, ...]).to(device),
+                            'rgb':torch.from_numpy(rgb[None, ...]).to(device)
+                        }
                     }
-                }
-                obs, pcd_list = _preprocess_inputs_real(obs_dict, ['3rd'])      
-                pc, img_feat = get_pc_img_feat(obs, pcd_list)
-                pc, img_feat = move_pc_in_bound(pc, img_feat, SCENE_BOUNDS_REAL, no_op=not move_pc_in_bound)
-                pc = [
-                        place_pc_in_cube(
+                    obs, pcd_list = _preprocess_inputs_real(obs_dict, ['3rd'])      
+                    pc, img_feat = get_pc_img_feat(obs, pcd_list)
+                    pc, img_feat = move_pc_in_bound(pc, img_feat, SCENE_BOUNDS_REAL, no_op=not move_pc_in_bound)
+                    pc = [
+                            place_pc_in_cube(
+                                _pc,
+                                with_mean_or_bounds=PLACE_WITH_MEAN,
+                                scene_bounds=None if PLACE_WITH_MEAN else SCENE_BOUNDS_REAL,
+                            )[0]
+                            for _pc in pc
+                        ]
+                    # 确保数据类型一致
+                    pc = pc[0].float()
+                    img_feat = img_feat[0].float()
+                    if dyn_cam_info is None:
+                        dyn_cam_info_itr = (None,)
+                    else:
+                        dyn_cam_info_itr = dyn_cam_info
+                    img = [
+                        renderer(
                             _pc,
-                            with_mean_or_bounds=PLACE_WITH_MEAN,
-                            scene_bounds=None if PLACE_WITH_MEAN else SCENE_BOUNDS_REAL,
-                        )[0]
-                        for _pc in pc
+                            _img_feat,  # 只传图像特征，不拼接点云坐标
+                            fix_cam=True,
+                            dyn_cam_info=(_dyn_cam_info,)
+                            if not (_dyn_cam_info is None)
+                            else None,
+                        ).squeeze()
+                        for (_pc, _img_feat, _dyn_cam_info) in zip(
+                            [pc], [img_feat], dyn_cam_info_itr
+                        )
                     ]
-                # 确保数据类型一致
-                pc = pc[0].float()
-                img_feat = img_feat[0].float()
-                if dyn_cam_info is None:
-                    dyn_cam_info_itr = (None,)
-                else:
-                    dyn_cam_info_itr = dyn_cam_info
-                img = [
-                    renderer(
-                        _pc,
-                        _img_feat,  # 只传图像特征，不拼接点云坐标
-                        fix_cam=True,
-                        dyn_cam_info=(_dyn_cam_info,)
-                        if not (_dyn_cam_info is None)
-                        else None,
-                    ).squeeze()
-                    for (_pc, _img_feat, _dyn_cam_info) in zip(
-                        [pc], [img_feat], dyn_cam_info_itr
-                    )
-                ]
-                img = torch.cat(img, 0).squeeze().detach().cpu()
-                img = np.asarray(img)
-                
-                # from matplotlib import pyplot as plt
-                # img = (img.clip(0,1) if img.max()<=1 else img/255.0)  # 归一化
-                # for i in range(img.shape[0]):
-                #     plt.imsave(f'img{i}.png', img[i])
+                    img = torch.cat(img, 0).squeeze().detach().cpu()
+                    img = np.asarray(img)
+                    
+                    # from matplotlib import pyplot as plt
+                    # img = (img.clip(0,1) if img.max()<=1 else img/255.0)  # 归一化
+                    # for i in range(img.shape[0]):
+                    #     plt.imsave(f'img{i}.png', img[i])
 
-                # 添加帧到数据集
-                dataset.add_frame(
-                    {
-                        "top_image": img[0],
-                        "front_image": img[1],
-                        "right_image": img[2],
-                        "pcd": pcd,
-                        # "gripper_pose": gripper_pose_full,
-                        "state": state,
-                        "lang_goal": instruction.strip(),
-                        "action": gripper_pose_full,
-                        "task": task,
-                    }
-                )
+                    # 添加帧到数据集
+                    dataset.add_frame(
+                        {
+                            "top_image": img[0],
+                            "front_image": img[1],
+                            "right_image": img[2],
+                            "pcd": pcd,
+                            # "gripper_pose": gripper_pose_full,
+                            "state": state,
+                            "lang_goal": instruction.strip(),
+                            "action": gripper_pose_full,
+                            "task": task,
+                        }
+                    )
+                else:
+                    
+                    # 添加帧到数据集
+                    dataset.add_frame(
+                        {
+                            "top_image": rgb,
+                            # "front_image": img[1],
+                            # "right_image": img[2],
+                            "pcd": pcd,
+                            # "gripper_pose": gripper_pose_full,
+                            "state": state,
+                            "lang_goal": instruction.strip(),
+                            "action": gripper_pose_full,
+                            "task": task,
+                        }
+                    )
 
             dataset.save_episode()
 
@@ -521,8 +541,9 @@ if __name__ == "__main__":
     
     sys.argv = [
         sys.argv[0],  # 脚本名
-        "--data_dir", os.path.join(HOME, 
-                                   "vla/pi0_bridge/datasets/dobot_formate_0611"),  # 数据目录
+        # "--data_dir", '/home/BridgeVLA/data/202507013',  # 数据目录
+        "--data_dir", '/home/lpy/vla/pi0_bridge/datasets/dobot_formate_0611',  # 数据目录
+        
         "--device", device,
         # "--push_to_hub",
     ]

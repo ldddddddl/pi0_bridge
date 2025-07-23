@@ -4,6 +4,7 @@ This script is used to compute the normalization statistics for a given config. 
 will compute the mean and standard deviation of the data in the dataset and save it
 to the config assets directory.
 """
+import os
 
 import numpy as np
 import tqdm
@@ -86,6 +87,8 @@ def create_rlds_dataloader(
 
 def main(config_name: str, max_frames: int | None = None):
     config = _config.get_config(config_name)
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.device
+    
     data_config = config.data.create(config.assets_dirs, config.model)
 
     if data_config.rlds_data_dir is not None:

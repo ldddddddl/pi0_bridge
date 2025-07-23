@@ -2,6 +2,7 @@ import dataclasses
 import enum
 import logging
 import socket
+import os
 
 import tyro
 
@@ -54,6 +55,9 @@ class Args:
     # Record the policy's behavior for debugging.
     record: bool = False
 
+    # 指定用于推理的 GPU 设备，如 "0" 或 "0,1"
+    device: str = "7"
+
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
 
@@ -79,7 +83,7 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
 }
 
 
-def create_default_policy(env: EnvMode, *, default_prompt: str | None = None) -> _policy.Policy:
+def create_default_policy(env: EnvMode, *, default_prompt: str | None = None, device: str = "0") -> _policy.Policy:
     """Create a default policy for the given environment."""
     if checkpoint := DEFAULT_CHECKPOINT.get(env):
         return _policy_config.create_trained_policy(
@@ -100,6 +104,8 @@ def create_policy(args: Args) -> _policy.Policy:
 
 
 def main(args: Args) -> None:
+    # 设置 CUDA_VISIBLE_DEVICES 环境变量
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.device
     policy = create_policy(args)
     policy_metadata = policy.metadata
 

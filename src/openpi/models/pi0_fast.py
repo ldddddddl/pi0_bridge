@@ -303,4 +303,13 @@ class Pi0FAST(_model.BaseModel):
 
         # Use lax.while_loop so we can jit the full decoding loop.
         _, output_tokens, _, _, _ = jax.lax.while_loop(cond, step, (last_logit, output_tokens, kv_cache, False, 0))
+        # breakpoint()
         return output_tokens
+
+    @override
+    def action2endpos(self, actions: _model.Actions) -> at.Float[at.Array, "*b ah ed"]:
+        """Converts actions to end-effector positions."""
+        # This is a placeholder implementation.
+        # The actual implementation will depend on the specific robot and environment.
+        # return jnp.zeros_like(actions)
+        pass
