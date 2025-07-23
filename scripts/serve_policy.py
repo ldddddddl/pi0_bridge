@@ -22,7 +22,7 @@ class EnvMode(enum.Enum):
     ALOHA_SIM = "aloha_sim"
     DROID = "droid"
     LIBERO = "libero"
-
+    BRIDGE = "bridge"
 
 @dataclasses.dataclass
 class Checkpoint:
@@ -56,7 +56,7 @@ class Args:
     record: bool = False
 
     # 指定用于推理的 GPU 设备，如 "0" 或 "0,1"
-    device: str = "7"
+    device: str = "0"
 
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
@@ -79,6 +79,10 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     EnvMode.LIBERO: Checkpoint(
         config="pi0_fast_libero",
         dir="gs://openpi-assets/checkpoints/pi0_fast_libero",
+    ),
+    EnvMode.BRIDGE: Checkpoint(
+        config="pi0_bridge",
+        dir="/home/lpy/vla/pi0_bridge/checkpoints/pi0_bridge/pi0_bridge/29999",
     ),
 }
 

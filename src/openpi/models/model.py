@@ -328,4 +328,43 @@ def restore_params(
     flat_params = traverse_util.flatten_dict(params)
     if all(kp[-1] == "value" for kp in flat_params):
         flat_params = {kp[:-1]: v for kp, v in flat_params.items()}
-    return traverse_util.unflatten_dict(flat_params)
+    
+    # 如果 key 是 tuple，且 tuple 里有字符串数字，转成 int
+    def tuple_key_to_int(k):
+        return tuple(int(x) if isinstance(x, str) and x.isdigit() else x for x in k)
+    flat_params = {tuple_key_to_int(k): v for k, v in flat_params.items()}
+
+    # 先将 tuple key 的 dict 转为嵌套 dict，并在插入时把字符串数字 key 转成 int
+    def tuplekey_dict_to_nested(d):
+        result = {}
+        for k, v in d.items():
+            if isinstance(k, tuple):
+                cur = result
+                for ki in k[:-1]:
+                    ki_new = int(ki) if isinstance(ki, str) and ki.isdigit() else ki
+                    if ki_new not in cur:
+                        cur[ki_new] = {}
+                    cur = cur[ki_new]
+                last_key = int(k[-1]) if isinstance(k[-1], str) and k[-1].isdigit() else k[-1]
+                cur[last_key] = v
+            else:
+                k_new = int(k) if isinstance(k, str) and k.isdigit() else k
+                result[k_new] = v
+        return result
+    params = tuplekey_dict_to_nested(flat_params)
+
+    # 再递归将所有 key 为字符串数字的 dict key 转为 int
+    def convert_keys_to_int(d):
+        if isinstance(d, dict):
+            new_dict = {}
+            for k, v in d.items():
+                new_k = int(k) if isinstance(k, str) and k.isdigit() else k
+                new_dict[new_k] = convert_keys_to_int(v)
+            return new_dict
+        elif isinstance(d, list):
+            return [convert_keys_to_int(x) for x in d]
+        else:
+            return d
+    params = convert_keys_to_int(params)
+    breakpoint()
+    return params
