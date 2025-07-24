@@ -3,6 +3,7 @@ import enum
 import logging
 import socket
 import os
+from pathlib import Path
 
 import tyro
 
@@ -14,6 +15,8 @@ from openpi.training import config as _config
 # os.environ["http_proxy"] = "http://localhost:10808"
 # os.environ["https_proxy"] = "http://localhost:10808"
 
+
+HOME = str(Path.home())
 
 class EnvMode(enum.Enum):
     """Supported environments."""
@@ -82,7 +85,7 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     ),
     EnvMode.BRIDGE: Checkpoint(
         config="pi0_bridge",
-        dir="/home/lpy/vla/pi0_bridge/checkpoints/pi0_bridge/pi0_bridge/29999",
+        dir=os.path.join(HOME, "vla/pi0_bridge/checkpoints/pi0_bridge/pi0_bridge/29999"),
     ),
 }
 

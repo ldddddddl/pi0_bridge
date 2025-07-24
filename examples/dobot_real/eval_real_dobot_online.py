@@ -210,6 +210,21 @@ def save_to_local(observation, end_pose, current_gripper, step, local_path):
     with open(pose_path, "wb") as f:
         pickle.dump(pose,f)
 
+def convert_endpos2gripperpos(gripper_pose):
+    '''
+    param:
+    @input[x, y, z, r, p, y]
+    @output[x, y, z, w, xi, yj, zk, gripper_state]
+    '''
+    gripper_pose_xyz = np.array(gripper_pose["position"]) / 1000  # mm -> m
+    gripper_pose_euler = gripper_pose["orientation"]
+    gripper_pose_quat = R.from_euler("xyz", gripper_pose_euler, degrees=True).as_quat()
+    gripper_pose_full = np.concatenate(
+        (gripper_pose_xyz, gripper_pose_quat, [gripper_pose["claw_status"]]), axis=0
+    ).astype(np.float32)
+
+    return gripper_pose_full
+
 
 def _eval(args: Args):
     base_path = "/home/zk/Projects/3d_vla/checkpoints/wbl_pipeline"
@@ -367,7 +382,7 @@ def _eval(args: Args):
                     [[current_gripper], [current_time]]).astype(np.float32)
 
                 end_pose = bot.get_pose()
-
+                gripper_pos = convert_endpos2gripperpos(end_pose)
             # 保存rgb，pcd， pose
             local_path = "/home/zk/Projects/local_data_0604_25/"
             # save_to_local(observation, end_pose, current_gripper, step, local_path)
@@ -390,7 +405,7 @@ def _eval(args: Args):
             
             element = {
                         "observation/image": observation["3rd"]["rgb"],  # shape[224,224,3]
-                        "observation/state": end_pose,
+                        "observation/state": gripper_pos,
                         "prompt": observation["language_goal"],
                     }
             time1 = time.time()
@@ -525,8 +540,6 @@ def _eval(args: Args):
                     bot_r.wait_and_prompt()  # 如不需要等待，而是直接运行全过程，可注释掉这一句
             else:
                 bot.wait_and_prompt()  # 如不需要等待，而是直接运行全过程，可注释掉这一句
-
-
 
     finally:
         print("close servers")
