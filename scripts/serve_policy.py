@@ -56,7 +56,7 @@ class Args:
     record: bool = False
 
     # 指定用于推理的 GPU 设备，如 "0" 或 "0,1"
-    device: str = "0"
+    device: str = "2"
 
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
@@ -132,4 +132,10 @@ def main(args: Args) -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, force=True)
+    import sys
+    sys.argv = [
+        sys.argv[0],  # 脚本名
+        "--env",  # 第一个位置参数
+        "BRIDGE",
+    ]
     main(tyro.cli(Args))

@@ -231,8 +231,10 @@ class BaseModelConfig(abc.ABC):
         """Create a model with the given parameters."""
         model = nnx.eval_shape(self.create, jax.random.key(0))
         graphdef, state = nnx.split(model)
+        params = convert_paramkey2int(params)
         if remove_extra_params:
             params = ocp.transform_utils.intersect_trees(state.to_pure_dict(), params)
+        params = convert_paramkey2int(params)
         at.check_pytree_equality(expected=state.to_pure_dict(), got=params, check_shapes=True, check_dtypes=False)
         state.replace_by_pure_dict(params)
         return nnx.merge(graphdef, state)
@@ -329,6 +331,13 @@ def restore_params(
     if all(kp[-1] == "value" for kp in flat_params):
         flat_params = {kp[:-1]: v for kp, v in flat_params.items()}
     
+    return params
+
+def convert_paramkey2int(params):
+    flat_params = traverse_util.flatten_dict(params)
+    if all(kp[-1] == "value" for kp in flat_params):
+        flat_params = {kp[:-1]: v for kp, v in flat_params.items()}
+
     # 如果 key 是 tuple，且 tuple 里有字符串数字，转成 int
     def tuple_key_to_int(k):
         return tuple(int(x) if isinstance(x, str) and x.isdigit() else x for x in k)
@@ -352,19 +361,22 @@ def restore_params(
                 result[k_new] = v
         return result
     params = tuplekey_dict_to_nested(flat_params)
-
-    # 再递归将所有 key 为字符串数字的 dict key 转为 int
-    def convert_keys_to_int(d):
-        if isinstance(d, dict):
-            new_dict = {}
-            for k, v in d.items():
-                new_k = int(k) if isinstance(k, str) and k.isdigit() else k
-                new_dict[new_k] = convert_keys_to_int(v)
-            return new_dict
-        elif isinstance(d, list):
-            return [convert_keys_to_int(x) for x in d]
-        else:
-            return d
-    params = convert_keys_to_int(params)
-    breakpoint()
+    # # 递归将所有 dict 的 key 为字符串数字的都转为 int
+    # def deep_convert_keys_to_int(obj):
+    #     if isinstance(obj, dict):
+    #         new_dict = {}
+    #         for k, v in obj.items():
+    #             # 只要是字符串且内容为数字就转为 int
+    #             if isinstance(k, str) and k.isdigit():
+    #                 new_k = int(k)
+    #             else:
+    #                 new_k = k
+    #             new_dict[new_k] = deep_convert_keys_to_int(v)
+    #         return new_dict
+    #     elif isinstance(obj, list):
+    #         return [deep_convert_keys_to_int(x) for x in obj]
+    #     else:
+    #         return obj
+    # params = deep_convert_keys_to_int(params)
+    
     return params
