@@ -365,8 +365,14 @@ class Pi0(_model.BaseModel):
             # 对浮点误差具有鲁棒性
             return time >= -dt / 2
         if self.output_format == 'end_pos':
-            x_0 = step((observation.state, 1.0))
-        x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
+            # 扩展 state 以适配 step/ embed_suffix 的输入
+            state_expanded = jnp.broadcast_to(
+                observation.state[:, None, :],
+                (observation.state.shape[0], self.action_horizon, self.action_dim)
+            )
+            x_0 = step((state_expanded, 1.0))
+        else:
+            x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
 
         return x_0
 

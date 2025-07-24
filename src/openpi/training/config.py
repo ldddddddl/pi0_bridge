@@ -424,7 +424,7 @@ class TrainConfig:
     resume: bool = False
 
     # 如果为 true，将启用 wandb 日志记录
-    wandb_enabled: bool = True
+    wandb_enabled: bool = False
 
     # 用于传递元数据到策略服务器
     policy_metadata: dict[str, Any] | None = None

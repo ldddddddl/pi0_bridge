@@ -13,12 +13,12 @@ import logging
 import math
 import pathlib
 
-# import sys
-# import os
-# # 添加第三方库路径到 sys.path（关键修改）
-# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# THIRD_PARTY_PATH = os.path.join(BASE_DIR, "third_party", "libero")
-# sys.path.insert(0, THIRD_PARTY_PATH)
+import sys
+import os
+# 添加第三方库路径到 sys.path（关键修改）
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+THIRD_PARTY_PATH = os.path.join(BASE_DIR, "third_party", "libero")
+sys.path.insert(0, THIRD_PARTY_PATH)
 import imageio
 from libero.libero import benchmark
 from libero.libero import get_libero_path
@@ -161,8 +161,9 @@ def eval_libero(args: Args) -> None:
                             len(action_chunk) >= args.replan_steps
                         ), f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
                         action_plan.extend(action_chunk[: args.replan_steps])
-
+                        
                     action = action_plan.popleft()
+                    breakpoint()
 
                     # Execute action in environment
                     obs, reward, done, info = env.step(action.tolist())
@@ -178,7 +179,6 @@ def eval_libero(args: Args) -> None:
                 except Exception as e:
                     logging.error(f"Caught exception: {e}")
                     break
-                # breakpoint()
             task_episodes += 1
             total_episodes += 1
 
