@@ -204,10 +204,21 @@ def train_step(
 
     new_state = dataclasses.replace(state, step=state.step + 1, params=new_params, opt_state=new_opt_state)
     if state.ema_decay is not None:
+        def ema_update(old, new):
+            if isinstance(old, jnp.ndarray) and isinstance(new, jnp.ndarray):
+                # 只对浮点类型做EMA
+                if jnp.issubdtype(old.dtype, jnp.floating) and jnp.issubdtype(new.dtype, jnp.floating):
+                    return state.ema_decay * old + (1 - state.ema_decay) * new
+                else:
+                    return new
+            else:
+                return new
         new_state = dataclasses.replace(
             new_state,
             ema_params=jax.tree.map(
-                lambda old, new: state.ema_decay * old + (1 - state.ema_decay) * new, state.ema_params, new_params
+                ema_update,
+                state.ema_params,
+                new_params,
             ),
         )
 
@@ -400,7 +411,7 @@ if __name__ == "__main__":
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "4, 5, 6, 7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1, 2"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [

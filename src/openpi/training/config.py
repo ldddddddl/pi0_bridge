@@ -409,12 +409,12 @@ class TrainConfig:
     # 但会增加内存和 CPU 使用率。
     num_workers: int = 2
     # 要运行的训练步骤（批次）数
-    num_train_steps: int = 30_000
+    num_train_steps: int = 10_000
 
     # 记录训练指标的频率（以步骤为单位）
     log_interval: int = 100
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 10000
+    save_interval: int = 5000
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
     keep_period: int | None = 5000
 
@@ -424,7 +424,7 @@ class TrainConfig:
     resume: bool = False
 
     # 如果为 true，将启用 wandb 日志记录
-    wandb_enabled: bool = False
+    wandb_enabled: bool = True
 
     # 用于传递元数据到策略服务器
     policy_metadata: dict[str, Any] | None = None
@@ -444,7 +444,7 @@ class TrainConfig:
     # 验证间隔
     valid_interval: int = 100        
     # device id 
-    device: str = "7"
+    device: str = "1, 2, 3"
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -453,10 +453,13 @@ class TrainConfig:
 
     @property
     def checkpoint_dir(self) -> pathlib.Path:
+        import datetime
+        ct = datetime.datetime.now()
+        t_formated = ct.strftime("%Y-%m-%d-%H-%M")
         """获取此配置的检查点目录。"""
         if not self.exp_name:
             raise ValueError("必须设置 --exp_name")
-        return (pathlib.Path(self.checkpoint_base_dir) / self.name / self.exp_name).resolve()
+        return (pathlib.Path(self.checkpoint_base_dir) / self.name / self.exp_name / t_formated).resolve()
 
     @property
     def trainable_filter(self) -> nnx.filterlib.Filter:
@@ -609,14 +612,14 @@ _CONFIGS = [
         # 对于您自己的数据集，您可以更改 repo_id 以指向您的数据集。
         # 同时修改 DataConfig 以使用您在上面为您的数据集创建的新配置。
         data=LeRobotLiberoDataConfig(
-            repo_id="/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013",
+            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                root='/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013',
-                repo_id='/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013',
+                root='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
+                repo_id='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
             ),
         ),
         # 定义要加载哪个预训练检查点来初始化模型。

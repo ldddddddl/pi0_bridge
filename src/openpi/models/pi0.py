@@ -186,8 +186,10 @@ class Pi0(_model.BaseModel):
         if config.output_format == "end_pos":
             self.joint2endpos_head = nnx.Sequential(
                 nnx.Linear(config.action_dim, 128, rngs=rngs),
+                nnx.Dropout(0.2, rngs=rngs),
                 nnx.swish,
                 nnx.Linear(128, 64, rngs=rngs),
+                nnx.Dropout(0.3, rngs=rngs),
                 nnx.swish,
                 nnx.Linear(64, config.action_dim, rngs=rngs),
             )
