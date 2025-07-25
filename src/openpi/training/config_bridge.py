@@ -285,7 +285,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         # 您可以用自己的转换替换下面的转换。
         data_transforms = _transforms.Group(
             inputs=[libero_policy.LiberoInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
-            outputs=[libero_policy.LiberoOutputs()],
+            outputs=[libero_policy.BridgeOutputs()],
         )
 
         # 一个额外的数据转换：pi0 模型在增量动作上训练（相对于每个动作块中的第一个状态）。

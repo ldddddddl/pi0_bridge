@@ -20,7 +20,7 @@ import numpy as np
 import open3d as o3d
 
 
-from src.openpi.bridgevla.mvt import mvt
+# from src.openpi.bridgevla.mvt import mvt
 from openpi_client import websocket_client_policy as _websocket_client_policy
 from botarm import *
 # from src.openpi.bridgevla.mvt import config as default_mvt_cfg
@@ -39,11 +39,11 @@ os.environ["BITSANDBYTES_NOWELCOME"] = "1"
 
 CAMERAS = ["3rd"]
 SCENE_BOUNDS = [
-    -1.3,
-    -1.5,
-    -0.1,
-    0.4,
-    0.7,
+    -1.1,
+    -0.6,
+    -0.2,
+    0.2,
+    0.5,
     0.6,
 ]  # [x_min, y_min, z_min, x_max, y_max, z_max] - the metric volume to be voxelized
 IMAGE_SIZE = 128
@@ -57,6 +57,7 @@ class Args:
 
     num_episodes: int = 1
     max_episode_steps: int = 1000
+    replan_steps: int = 1
 
 
 
@@ -210,17 +211,18 @@ def save_to_local(observation, end_pose, current_gripper, step, local_path):
     with open(pose_path, "wb") as f:
         pickle.dump(pose,f)
 
-def convert_endpos2gripperpos(gripper_pose):
+def convert_endpos2gripperpos(gripper_pose, gripper_state):
     '''
     param:
     @input[x, y, z, r, p, y]
     @output[x, y, z, w, xi, yj, zk, gripper_state]
     '''
-    gripper_pose_xyz = np.array(gripper_pose["position"]) / 1000  # mm -> m
-    gripper_pose_euler = gripper_pose["orientation"]
+    gripper_pose = [float(i) for i in gripper_pose]
+    gripper_pose_xyz = np.array(gripper_pose[:3]) / 1000  # mm -> m
+    gripper_pose_euler = gripper_pose[3:]
     gripper_pose_quat = R.from_euler("xyz", gripper_pose_euler, degrees=True).as_quat()
     gripper_pose_full = np.concatenate(
-        (gripper_pose_xyz, gripper_pose_quat, [gripper_pose["claw_status"]]), axis=0
+        (gripper_pose_xyz, gripper_pose_quat, gripper_state), axis=0
     ).astype(np.float32)
 
     return gripper_pose_full
@@ -243,18 +245,16 @@ def _eval(args: Args):
     # cameras_view=["3rd", "wrist"]
     cameras_view = ["3rd"]
 
-
-
     device = f"cuda:0"
     observation = {}
 
     # instructions = [[["put the bottle in the microwave"]]]        #  放瓶子进微波炉
-    instructions = [[["put the tiger in the upper drawer"]]]          #  放方块在架子上
+    # instructions = [[["put the tiger in the upper drawer"]]]          #  放方块在架子上
     # instructions = [[["put the yellow cube in the blue plate"]]]             #  放方块进盘子
     # instructions = [[["put the sanitizer in the top shelf"]]]                       #  放洗发水
 
 
-    # instructions = [[["put the Redbull in the top shelf"]]]       #
+    instructions = [[["put the Redbull in the top shelf"]]]       #
 #@
     # instructions = [[["put the red bottle in the top shelf"]]]
     # instructions = [[["put the Redbull in the bottom shelf"]]]  #
@@ -316,7 +316,7 @@ def _eval(args: Args):
     agent = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
 
 
-    observation["language_goal"] = instructions
+    observation["language_goal"] = instructions[0][0][0]
 
     # 初始化机械臂
     if output_arm_flag:
@@ -382,7 +382,7 @@ def _eval(args: Args):
                     [[current_gripper], [current_time]]).astype(np.float32)
 
                 end_pose = bot.get_pose()
-                gripper_pos = convert_endpos2gripperpos(end_pose)
+                gripper_pos = convert_endpos2gripperpos(end_pose, np.asarray([bool(current_gripper)]))
             # 保存rgb，pcd， pose
             local_path = "/home/zk/Projects/local_data_0604_25/"
             # save_to_local(observation, end_pose, current_gripper, step, local_path)
@@ -391,8 +391,7 @@ def _eval(args: Args):
             observation["3rd"]["rgb"] = cv2.cvtColor(observation["3rd"]["rgb"], cv2.COLOR_RGB2BGR)
             # vis_pcd(test_pcd, test_rgb)
             # vis_pcd(observation["3rd"]["pcd"], observation["3rd"]["rgb"])
-            observation_origen = copy.deepcopy(observation)
-
+            img = cv2.resize(observation["3rd"]["rgb"],  (256, 256), interpolation=cv2.INTER_LINEAR)
             for key, v in observation.items():
                 if isinstance(v, dict):
                     for sub_k, sub_v in v.items():
@@ -404,7 +403,7 @@ def _eval(args: Args):
                     observation[key] = torch.from_numpy(v).to(device).unsqueeze(0).contiguous()
             
             element = {
-                        "observation/image": observation["3rd"]["rgb"],  # shape[224,224,3]
+                        "observation/image": img,  # shape[256,256,3]
                         "observation/state": gripper_pos,
                         "prompt": observation["language_goal"],
                     }
@@ -419,6 +418,12 @@ def _eval(args: Args):
                 action_plan.extend(action_chunk[: args.replan_steps])
             action = action_plan.popleft()
             target_pos, target_quat_, target_gripper = action[:3], action[3:-1], action[-1:],
+            if target_gripper >= 0.9:
+                target_gripper = 1
+            elif target_gripper <= 0.2:
+                target_gripper = 0
+            else:
+                target_gripper = current_gripper
             time2 = time.time()
             print("推理一次需要时间:", time2 - time1)
             # target_quat=[target_quat_[3],target_quat_[0],target_quat_[1],target_quat_[2]]
@@ -462,6 +467,7 @@ def _eval(args: Args):
             # y_range = (-0.95, -0.25)
             # z_range = (0.05, 0.7)q
 
+            target_pos = target_pos.copy()
             # target_pos[0] = np.clip(target_pos[0], x_range[0], x_range[1])
             target_pos[1] = np.clip(target_pos[1], y_range[0], y_range[1])
             target_pos[2] = np.clip(target_pos[2], z_range[0], z_range[1])
@@ -562,4 +568,4 @@ if __name__ == "__main__":
     # debugpy.listen(("0.0.0.0", 5678))
     # print("Waiting for debugger attach")
     # debugpy.wait_for_client()
-    _eval()
+    _eval(Args)

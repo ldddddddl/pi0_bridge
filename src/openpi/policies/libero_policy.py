@@ -112,6 +112,23 @@ class LiberoOutputs(transforms.DataTransformFn):
     def __call__(self, data: dict) -> dict:
         # Only return the first N actions -- since we padded actions above to fit the model action
         # dimension, we need to now parse out the correct number of actions in the return dict.
-        # For Libero, we only return the first 7 actions (since the rest is padding).
-        # For your own dataset, replace `7` with the action dimension of your dataset.
-        return {"actions": np.asarray(data["actions"][:, :7])}
+        # For pi0_bridge, we return the first 8 actions (since the model is 8-dimensional).
+        # For your own dataset, replace `8` with the action dimension of your dataset.
+        return {"actions": np.asarray(data["actions"][:, :8])}
+
+
+@dataclasses.dataclass(frozen=True)
+class BridgeOutputs(transforms.DataTransformFn):
+    """
+    This class is used to convert outputs from the model back the the dataset specific format. It is
+    used for inference only.
+
+    For pi0_bridge, we return the first 8 actions (since the model is 8-dimensional).
+    """
+
+    def __call__(self, data: dict) -> dict:
+        # Only return the first N actions -- since we padded actions above to fit the model action
+        # dimension, we need to now parse out the correct number of actions in the return dict.
+        # For pi0_bridge, we return the first 8 actions (since the model is 8-dimensional).
+        # For your own dataset, replace `8` with the action dimension of your dataset.
+        return {"actions": np.asarray(data["actions"][:, :8])}

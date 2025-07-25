@@ -564,7 +564,7 @@ _CONFIGS = [
         name="pi0_bridge_single",
         model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=1, max_token_len=180),
         data=LeRobotAlohaDataConfig(
-            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/dobot_formate_0611",
+            repo_id="/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013",
             # assets=AssetsConfig(
             #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
             #     asset_id="trossen",
@@ -609,14 +609,14 @@ _CONFIGS = [
         # 对于您自己的数据集，您可以更改 repo_id 以指向您的数据集。
         # 同时修改 DataConfig 以使用您在上面为您的数据集创建的新配置。
         data=LeRobotLiberoDataConfig(
-            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013",
+            repo_id="/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                root='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
-                repo_id='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
+                root='/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013',
+                repo_id='/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013',
             ),
         ),
         # 定义要加载哪个预训练检查点来初始化模型。

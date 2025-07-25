@@ -59,7 +59,7 @@ class Args:
     record: bool = False
 
     # 指定用于推理的 GPU 设备，如 "0" 或 "0,1"
-    device: str = "2"
+    device: str = "0"
 
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
@@ -85,7 +85,7 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     ),
     EnvMode.BRIDGE: Checkpoint(
         config="pi0_bridge",
-        dir=os.path.join(HOME, "vla/pi0_bridge/checkpoints/pi0_bridge/pi0_bridge/29999"),
+        dir=os.path.join(HOME, "vla/checkpoint/pi0_bridge_0713_dataset"),
     ),
 }
 
