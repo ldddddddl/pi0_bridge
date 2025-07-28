@@ -16,27 +16,25 @@ uv run examples/bridge/convert_bridge_data_to_lerobot.py --data_dir /path/to/you
 运行本转换脚本大约需要 30 分钟。
 """
 
-from codecs import ascii_encode
-import imp
 import os
 from pathlib import Path
 import pickle
 import shutil
 
-from PIL import Image
 from einops import rearrange
 
 # from lerobot.common.datasets.lerobot_dataset import LEROBOT_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import torch
 from tqdm import tqdm
 import tyro
-import torch
 
 from openpi.bridgevla.libs.point_renderer_main.point_renderer. \
     rvt_renderer import RVTBoxRenderer as BoxRenderer
 from openpi.bridgevla.mvt import config as mvt_config
+
 # from openpi.bridgevla.utils.rvt_utils import move_pc_in_bound
 # from openpi.bridgevla.mvt.utils import place_pc_in_cube
 
@@ -48,7 +46,7 @@ os.environ["https_proxy"] = "http://localhost:10808"
 HOME = str(Path.home())
 os.environ["LEROBOT_HOME"] = os.path.join(HOME, "pi0_bridge/datasets")
 # REPO_NAME = "lddddl/dobot_formate_0611"  # 数据集名称
-REPO_NAME = None    
+REPO_NAME = None
 OUTPUT_PATH = os.path.join(HOME, "vla/pi0_bridge/datasets/converted_dataset")  # 输出目录
 # DATASET_PATH = os.path.join(HOME, '/home/BridgeVLA/data/202507013')
 SCENE_BOUNDS_REAL = [
@@ -137,9 +135,9 @@ def convert_pcd_to_base(extrinsic_path, pcd, type="3rd"):
 
 def _preprocess_inputs_real(replay_sample, cameras):
     obs, pcds = [], []
-    
+
     for n in cameras:
-    
+
         rgb = replay_sample[n]["rgb"]
         pcd = replay_sample[n]["pcd"]
 
@@ -229,7 +227,7 @@ def place_pc_in_cube(
     if with_mean_or_bounds:
         assert scene_bounds is None
     else:
-        assert not (scene_bounds is None)
+        assert scene_bounds is not None
     if with_mean_or_bounds:
         pc_mid = (torch.max(pc, 0)[0] + torch.min(pc, 0)[0]) / 2
         x_len, y_len, z_len = torch.max(pc, 0)[0] - torch.min(pc, 0)[0]
@@ -321,7 +319,7 @@ def process_pcd(pcd_data, extrinsic_path):
 
 
 def get_gripper_pos(gripper_pose, step):
-    
+
     gripper_pose_xyz = np.array(gripper_pose[step]["position"]) / 1000  # mm -> m
     gripper_pose_euler = gripper_pose[step]["orientation"]
     gripper_pose_quat = R.from_euler("xyz", gripper_pose_euler, degrees=True).as_quat()
@@ -335,9 +333,9 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
 
     image_size = 256
     image_channel = 3
-    dyn_cam_info = None 
+    dyn_cam_info = None
     mvt_cfg = mvt_config.get_cfg_defaults()
-    dataset_name = data_dir.split('/')[-1]
+    dataset_name = data_dir.split("/")[-1]
     # 清理输出目录中已存在的数据集
     output_path = os.path.join(OUTPUT_PATH, REPO_NAME if REPO_NAME is not None else dataset_name)
     if os.path.exists(output_path):
@@ -396,8 +394,8 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
         image_writer_threads=10,
         image_writer_processes=5,
     )
-    
-    
+
+
     renderer = BoxRenderer(
             device=device,
             img_size=(image_size, image_size),
@@ -432,8 +430,8 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
                 # 处理low_dim_state
                 current_gripper_state = gripper_pose[step]["claw_status"]
                 time = (1.0 - (step / float(num_steps - 1))) * 2.0 - 1.0
-                # low_dim_state = np.array([current_gripper_state, time], dtype=np.float32)      
-                
+                # low_dim_state = np.array([current_gripper_state, time], dtype=np.float32)
+
                 # 读取并处理RGB图像
                 with open(os.path.join(rgb_3rd, f"{step}.pkl"), "rb") as f:
                     rgb = process_image(pickle.load(f))
@@ -445,12 +443,12 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
                 if PCD2RGB:
                     # convert point cloud to img
                     obs_dict = {
-                        '3rd':{
-                            'pcd':torch.from_numpy(pcd[None, ...]).to(device),
-                            'rgb':torch.from_numpy(rgb[None, ...]).to(device)
+                        "3rd":{
+                            "pcd":torch.from_numpy(pcd[None, ...]).to(device),
+                            "rgb":torch.from_numpy(rgb[None, ...]).to(device)
                         }
                     }
-                    obs, pcd_list = _preprocess_inputs_real(obs_dict, ['3rd'])      
+                    obs, pcd_list = _preprocess_inputs_real(obs_dict, ["3rd"])
                     pc, img_feat = get_pc_img_feat(obs, pcd_list)
                     pc, img_feat = move_pc_in_bound(pc, img_feat, SCENE_BOUNDS_REAL, no_op=not move_pc_in_bound)
                     pc = [
@@ -474,7 +472,7 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
                             _img_feat,  # 只传图像特征，不拼接点云坐标
                             fix_cam=True,
                             dyn_cam_info=(_dyn_cam_info,)
-                            if not (_dyn_cam_info is None)
+                            if _dyn_cam_info is not None
                             else None,
                         ).squeeze()
                         for (_pc, _img_feat, _dyn_cam_info) in zip(
@@ -483,7 +481,7 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
                     ]
                     img = torch.cat(img, 0).squeeze().detach().cpu()
                     img = np.asarray(img)
-                    
+
                     # from matplotlib import pyplot as plt
                     # img = (img.clip(0,1) if img.max()<=1 else img/255.0)  # 归一化
                     # for i in range(img.shape[0]):
@@ -504,7 +502,7 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
                         }
                     )
                 else:
-                    
+
                     # 添加帧到数据集
                     dataset.add_frame(
                         {
@@ -534,16 +532,16 @@ def main(data_dir: str, device: str, *, push_to_hub: bool = False):
 
 if __name__ == "__main__":
     import sys
-    
+
     use_cuda_id = 0
     assert torch.cuda.is_available()
-    device = f'cuda:{use_cuda_id}'
-    
+    device = f"cuda:{use_cuda_id}"
+
     sys.argv = [
         sys.argv[0],  # 脚本名
         # "--data_dir", '/home/BridgeVLA/data/202507013',  # 数据目录
-        "--data_dir", '/home/lpy/vla/pi0_bridge/datasets/dobot_formate_0611',  # 数据目录
-        
+        "--data_dir", "/home/lpy/vla/pi0_bridge/datasets/dobot_formate_0611",  # 数据目录
+
         "--device", device,
         # "--push_to_hub",
     ]

@@ -7,8 +7,8 @@ import flax.nnx.bridge as nnx_bridge
 import jax
 from jax import config
 import jax.numpy as jnp
-from typing_extensions import override
 import optax
+from typing_extensions import override
 
 from openpi.models import model as _model
 import openpi.models.gemma as _gemma
@@ -78,7 +78,7 @@ class Pi0Config(_model.BaseModelConfig):
     action_horizon: int = 50
     max_token_len: int = 48
     end_pos_dim: int = 8
-    output_format: str = "end_pos"
+    output_format: str = "traj"
 
     @property
     @override
@@ -186,10 +186,10 @@ class Pi0(_model.BaseModel):
         if config.output_format == "end_pos":
             self.joint2endpos_head = nnx.Sequential(
                 nnx.Linear(config.action_dim, 128, rngs=rngs),
-                nnx.Dropout(0.2, rngs=rngs),
+                nnx.Dropout(0.1, rngs=rngs),
                 nnx.swish,
                 nnx.Linear(128, 64, rngs=rngs),
-                nnx.Dropout(0.3, rngs=rngs),
+                nnx.Dropout(0.2, rngs=rngs),
                 nnx.swish,
                 nnx.Linear(64, config.action_dim, rngs=rngs),
             )
@@ -260,7 +260,7 @@ class Pi0(_model.BaseModel):
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
-        return tokens, input_mask, ar_mask  
+        return tokens, input_mask, ar_mask
 
     @override
     def compute_loss(
@@ -271,7 +271,7 @@ class Pi0(_model.BaseModel):
         # observation augmentations
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
         batch_shape = actions.shape[:-2]
-        if not self.output_format == "end_pos":
+        if self.output_format != "end_pos":
             noise = jax.random.normal(noise_rng, actions.shape)
             time = jax.random.beta(time_rng, 1.5, 1, batch_shape) * 0.999 + 0.001
             time_expanded = time[..., None, None]
@@ -300,8 +300,8 @@ class Pi0(_model.BaseModel):
             loss = jnp.mean(optax.l2_loss(actions - v_t_endpos))
         else:
             loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
-        
-        return loss 
+
+        return loss
 
     @override
     def action2endpos(self, actions: _model.Actions) -> at.Float[at.Array, "*b ah ed"]:
@@ -359,14 +359,13 @@ class Pi0(_model.BaseModel):
             if self.output_format == "end_pos":
                 v_t_endpos = self.joint2endpos_head(v_t)
                 return v_t_endpos
-            else:
-                return x_t + dt * v_t, time + dt
+            return x_t + dt * v_t, time + dt
 
         def cond(carry):
             x_t, time = carry
             # 对浮点误差具有鲁棒性
             return time >= -dt / 2
-        if self.output_format == 'end_pos':
+        if self.output_format == "end_pos":
             # 扩展 state 以适配 step/ embed_suffix 的输入
             state_expanded = jnp.broadcast_to(
                 observation.state[:, None, :],

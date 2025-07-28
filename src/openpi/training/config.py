@@ -414,7 +414,7 @@ class TrainConfig:
     # 记录训练指标的频率（以步骤为单位）
     log_interval: int = 100
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 5000
+    save_interval: int = 500
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
     keep_period: int | None = 5000
 
@@ -433,18 +433,18 @@ class TrainConfig:
     # 但训练可能会变慢。
     # 例如，如果总设备数为 4，fsdp 设备数为 2；那么模型将被分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
-    fsdp_devices: int = 2
+    fsdp_devices: int = 4
 
     # 末端位置维度
     end_pos_dim: int = 8
     # 输出格式
-    output_format: str = "end_pos"
+    output_format: str = "traj"
     # 验证集比例
-    valid_data_size: float = 0.2
+    valid_data_size: float = 0.1
     # 验证间隔
-    valid_interval: int = 100        
-    # device id 
-    device: str = "1, 2, 3"
+    valid_interval: int = 100
+    # inference device id
+    device: str = "3"
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -563,36 +563,6 @@ _CONFIGS = [
         # 查看基础 TrainConfig 类获取可用超参数的完整列表。
         num_train_steps=30_000,
     ),
-    TrainConfig(
-        name="pi0_bridge_single",
-        model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=1, max_token_len=180),
-        data=LeRobotAlohaDataConfig(
-            repo_id="/home/zk/vla/pi0_bridge/datasets/converted_dataset/202507013",
-            # assets=AssetsConfig(
-            #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
-            #     asset_id="trossen",
-            # ),
-            default_prompt="uncap the pen",
-            repack_transforms=_transforms.Group(
-                inputs=[
-                    _transforms.RepackTransform(
-                        {
-                            "images": {
-                                "cam_high": "top_image",
-                            },
-                            "state": "state",
-                            "actions": "action",
-                            "prompt": "lang_goal",
-                            
-                        }
-                    )
-                ]
-            ),
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
-        # num_train_steps=20_000,
-    ),
-    
     #
     # Bridge 微调配置。
     #
@@ -612,26 +582,47 @@ _CONFIGS = [
         # 对于您自己的数据集，您可以更改 repo_id 以指向您的数据集。
         # 同时修改 DataConfig 以使用您在上面为您的数据集创建的新配置。
         data=LeRobotLiberoDataConfig(
-            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013",
+            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi00725",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。
-                # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
+                # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。  # noqa: RUF003
                 prompt_from_task=True,
-                root='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
-                repo_id='/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013',
+                root="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi00725",
+                repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi00725",
             ),
         ),
         # 定义要加载哪个预训练检查点来初始化模型。
         # 这应该与您上面选择的模型配置匹配 -- 在这种情况下，我们使用 pi0 基础模型。
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
-        # 在下面，您可以定义其他超参数，例如学习率、训练步骤等。
+        # 在下面，您可以定义其他超参数，例如学习率、训练步骤等。  # noqa: RUF003
         # 查看基础 TrainConfig 类获取可用超参数的完整列表。
         # num_train_steps=30_000,
         # num_train_steps=200,
         # batch_size=1,
     ),
+    TrainConfig(
+        # 更改名称以反映您的模型和数据集。
+        name="pi0_bridge_traj",
+
+        model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=25, max_token_len=180, output_format = "traj"),
+
+        data=LeRobotLiberoDataConfig(
+            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
+            # repo_id='/datasets/converted_dataset/202507013',
+            base_config=DataConfig(
+                # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。  # noqa: RUF003
+                # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
+                prompt_from_task=True,
+                root="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
+                repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
+            ),
+        ),
+        output_format = "traj",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+    ),
+
     TrainConfig(
         name="pi0_libero_low_mem_finetune",
         # 这是一个加载 pi0 模型进行 LoRA 微调的示例。
@@ -745,7 +736,7 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
-            peak_lr=5e-5,
+            peak_lr=1e-5,
             decay_steps=1_000_000,
             decay_lr=5e-5,
         ),

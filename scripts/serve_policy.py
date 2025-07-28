@@ -85,7 +85,7 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     ),
     EnvMode.BRIDGE: Checkpoint(
         config="pi0_bridge",
-        dir=os.path.join(HOME, "vla/checkpoint/pi0_bridge_0713_dataset"),
+        dir=os.path.join(HOME, "vla/pi0_bridge/checkpoints/pi0_bridge/pi0_bridge/2025-07-25-05-43/9999"),
     ),
 }
 

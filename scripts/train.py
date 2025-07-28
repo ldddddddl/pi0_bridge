@@ -336,6 +336,24 @@ def main(config: _config.TrainConfig):
     train_data_iter = iter(train_loader)
     valid_data_iter = iter(valid_loader)
     batch = next(train_data_iter)
+
+    # test vis action
+    # obs, action = batch
+    # img = obs.images['base_0_rgb'][0] + 1.
+    # from PIL import Image
+    # img = np.asarray(np.clip(img, 0.0, 1.0) * 255.).astype(np.uint8)
+    # action_chunk = action[0, :, :8]
+    # x = range(25)
+    # import matplotlib.pyplot as plt
+    # for i in range(8):
+    #     plt.plot(x, action_chunk[:, i], linestyle='-', label=f'{i}')
+    # # 显示网格和图例
+    # plt.grid(True)
+    # plt.legend()
+    # plt.imsave('img.png', img)
+    # # 保存图像到文件    
+    # plt.savefig('1t.png', dpi=300, bbox_inches='tight')  # 保存为 PNG，分辨率 300 DPI
+
     logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
     logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
 
@@ -411,17 +429,17 @@ if __name__ == "__main__":
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1, 2"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "4, 5, 6, 7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
         sys.argv[0],  # 脚本名
-        "pi0_bridge",  # 第一个位置参数
+        "pi0_bridge_traj",  # 第一个位置参数
         "--exp-name",
-        "pi0_bridge",
+        "pi0_bridge_traj",
         "--overwrite",
         "--data.repo-id",
-        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/202507013",
+        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
     ]
 
     main(_config.cli())
