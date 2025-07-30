@@ -61,6 +61,8 @@ PLACE_WITH_MEAN = True
 PCD2RGB = False
 HORIZON = "1"
 
+DOBOT_CR5_JOINTS = [360, 360, 160, 360, 360, 360]
+
 def read_episode_data(episode_path):
     """
     读取新的数据格式中的episode数据
@@ -150,13 +152,14 @@ def convert_pose_to_gripper_state(pose_data):
     # end_pose格式: (x, y, z, rx, ry, rz)
     position = list(pose_data["end_pose"][:3])  # 前3个是位置
     orientation = list(pose_data["end_pose"][3:])  # 后3个是欧拉角
-
+    joint_state = list(np.array(pose_data["joint"]) / np.array(DOBOT_CR5_JOINTS))
     # 根据degree判断夹爪状态，90度通常是关闭状态
     claw_status = 1 if pose_data["degree"] > 89 else 0
 
     return {
         "position": position,
         "orientation": orientation,
+        "joint": joint_state,
         "claw_status": claw_status,
         "arm_flag": 0,  # 默认值
         "timestamp": pose_data["timestamp"]
@@ -216,11 +219,11 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
                 "shape": (image_channel, image_size, image_size),
                 "names": ["channel", "height", "width"],
             },
-            # "depth": {
-            #     "dtype": "float32",
-            #     "shape": (1, image_size, image_size),
-            #     "names": ["channel", "height", "width"],
-            # },
+            "wrist_image": {
+                "dtype": "image",
+                "shape": (image_channel, image_size, image_size),
+                "names": ["channel", "height", "width"],
+            },
             "state": {
                 "dtype": "float32",
                 "shape": (8 * horizon,),  # 修改为horizon倍的长度
@@ -263,18 +266,17 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
         episode_list = episode_data["episode_data"]
 
         # 获取图像和深度图路径
-        rgb_dir = os.path.join(task_path, "image", "rgb", "overhead_cam_rgb")
+        overhead_rgb_dir = os.path.join(task_path, "image", "rgb", "overhead_cam_rgb")
+        wrist_rgb_dir = os.path.join(task_path, "image", "wrist_rgb", "wrist_cam_rgb")
         depth_dir = os.path.join(task_path, "image", "depth", "overhead_cam_depth")
 
         # 获取所有图像文件
-        rgb_files = sorted([f for f in os.listdir(rgb_dir) if f.endswith(".png")])
+        overhead_rgb_files = sorted([os.path.join(overhead_rgb_dir, f) for f in os.listdir(overhead_rgb_dir) if f.endswith(".png")])
+        wrist_rgb_files = sorted([os.path.join(wrist_rgb_dir, f) for f in os.listdir(wrist_rgb_dir) if f.endswith(".png")])
         depth_files = sorted([f for f in os.listdir(depth_dir) if f.endswith(".png")])
 
-        print(f"Found {len(rgb_files)} RGB images and {len(depth_files)} depth images")
-        print(f"Episode has {len(episode_list)} steps")
-
         # 确保图像数量和episode步数匹配
-        min_steps = min(len(rgb_files), len(depth_files), len(episode_list))
+        min_steps = min(len(overhead_rgb_files), len(wrist_rgb_files), len(depth_files), len(episode_list))
 
         # 转换episode数据为gripper_pose格式
         gripper_pose = []
@@ -306,10 +308,9 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
         # plt.legend()
 
         # # 保存图像到文件
-        # plt.savefig('three_series_plot.png', dpi=300, bbox_inches='tight')  # 保存为 PNG，分辨率 300 DPI
+        # plt.savefig('three_series_plot.png', dpi=300, bbox_inches='tight')  
 
         # 根据horizon参数处理数据
-        # 计算可以创建多少个完整的horizon序列
         assert horizon > 0
         max_frames = (min_steps - 1) // horizon  # 减1是因为最后一步没有action
 
@@ -320,8 +321,8 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
             image_idx = frame_idx * horizon
 
             # 读取并处理RGB图像
-            rgb_file = os.path.join(rgb_dir, rgb_files[image_idx])
-            rgb = process_image_from_file(rgb_file)
+            top_rgb = process_image_from_file(overhead_rgb_files[image_idx])
+            wrist_rgb = process_image_from_file(wrist_rgb_files[image_idx])
 
             # 读取并处理深度图像
             depth_file = os.path.join(depth_dir, depth_files[image_idx])
@@ -330,7 +331,7 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
             # 收集当前horizon范围内的所有state和action
             states = []
             actions = []
-
+            joint_states = []
             start_step = frame_idx * horizon
             end_step = start_step + horizon
 
@@ -338,18 +339,20 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
                 # 处理gripper pose
                 state = get_gripper_pos(gripper_pose=gripper_pose, step=step)
                 gripper_pose_full = get_gripper_pos(gripper_pose=gripper_pose, step=step+1)
-
+                joint_states.append(gripper_pose[step]['joint'] + [0, 0])
                 states.append(state)
                 actions.append(gripper_pose_full)
 
             # 将states和actions展平为一维数组
             states_flat = np.concatenate(states)
             actions_flat = np.concatenate(actions)
-
+            joint_states_flat = np.concatenate(joint_states, dtype=np.float32)
+            # ttt = states_flat + joint_states_flat
             # 添加帧到数据集
             dataset.add_frame(
                 {
-                    "top_image": rgb,
+                    "top_image": top_rgb,
+                    "wrist_image": wrist_rgb,
                     # "depth": depth,
                     "state": states_flat,
                     "lang_goal": task_name.strip(),
@@ -380,7 +383,7 @@ if __name__ == "__main__":
     sys.argv = [
         sys.argv[0],  # 脚本名
         # "--data_dir", '/home/BridgeVLA/data/202507013',  # 数据目录
-        "--data_dir", "/home/lpy/vla/pi0_bridge/datasets/pi0_0728",  # 数据目录
+        "--data_dir", "/home/lpy/vla/pi0_bridge/datasets/pi0_0729",  # 数据目录
 
         "--device", device,
         "--horizon", HORIZON,  # 添加horizon参数

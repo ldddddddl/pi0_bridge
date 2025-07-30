@@ -1,9 +1,9 @@
 import dataclasses
+import datetime
 import functools
 import logging
 import platform
 from typing import Any
-import datetime
 
 import etils.epath as epath
 import flax.nnx as nnx
@@ -180,7 +180,7 @@ def train_step(
         model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
     ):
         chunked_loss = model.compute_loss(rng, observation, actions, train=True)
-        total_loss = jnp.mean(chunked_loss) 
+        total_loss = jnp.mean(chunked_loss)
         # 用 stop_gradient + float() 保证副产物为Python标量，避免nnx.value_and_grad报错
         return total_loss
 
@@ -209,10 +209,8 @@ def train_step(
                 # 只对浮点类型做EMA
                 if jnp.issubdtype(old.dtype, jnp.floating) and jnp.issubdtype(new.dtype, jnp.floating):
                     return state.ema_decay * old + (1 - state.ema_decay) * new
-                else:
-                    return new
-            else:
                 return new
+            return new
         new_state = dataclasses.replace(
             new_state,
             ema_params=jax.tree.map(
@@ -264,8 +262,8 @@ def valid_step(
     observation, actions = batch
     loss = loss_fn(model, valid_rng, observation, actions)
     # 这里只返回loss，后续可扩展更多指标
-    info = {"valid_total_loss": loss, 
-            # "valid_mse_loss_in": mse_loss_in, 
+    info = {"valid_total_loss": loss,
+            # "valid_mse_loss_in": mse_loss_in,
             # "valid_mse_loss_out": mse_loss_out
             }
     return info
@@ -313,7 +311,7 @@ def main(config: _config.TrainConfig):
     valid_indices = indices[train_len:]
 
     train_dataset = Subset(full_dataset, train_indices)
-    valid_dataset = Subset(full_dataset, valid_indices)
+    valid_dataset = Subset(full_dataset, valid_indices) if valid_len > 0 else train_dataset
 
     # 用DataLoaderImpl包装，保证输出(batch_observation, batch_actions)
     def make_loader(dataset, shuffle, sharding, batch_size, num_workers, seed):
@@ -351,7 +349,7 @@ def main(config: _config.TrainConfig):
     # plt.grid(True)
     # plt.legend()
     # plt.imsave('img.png', img)
-    # # 保存图像到文件    
+    # # 保存图像到文件
     # plt.savefig('1t.png', dpi=300, bbox_inches='tight')  # 保存为 PNG，分辨率 300 DPI
 
     logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
@@ -387,7 +385,6 @@ def main(config: _config.TrainConfig):
     )
 
     infos = []
-    valid_infos = []
     for step in pbar:
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
@@ -400,7 +397,7 @@ def main(config: _config.TrainConfig):
             wandb.log(reduced_info, step=step)
             infos = []
         # 每valid_interval步进行一次验证
-        if step % valid_interval == 0:
+        if step % valid_interval == 0 and valid_len > 0:
             try:
                 valid_batch = next(valid_data_iter)
             except StopIteration:
@@ -439,7 +436,7 @@ if __name__ == "__main__":
         "pi0_bridge_traj",
         "--overwrite",
         "--data.repo-id",
-        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
+        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
     ]
 
     main(_config.cli())

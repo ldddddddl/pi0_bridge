@@ -268,7 +268,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
                 _transforms.RepackTransform(
                     {
                         "observation/image": "top_image",
-                        # "observation/wrist_image": "front_image",
+                        "observation/wrist_image": "wrist_image",
                         # "observation/right_image": "right_image",
                         "observation/state": "state",
                         # "observation/gripper_pose": "gripper_pose",
@@ -412,9 +412,9 @@ class TrainConfig:
     num_train_steps: int = 10_000
 
     # 记录训练指标的频率（以步骤为单位）
-    log_interval: int = 100
+    log_interval: int = 200
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 500
+    save_interval: int = 5000
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
     keep_period: int | None = 5000
 
@@ -440,7 +440,7 @@ class TrainConfig:
     # 输出格式
     output_format: str = "traj"
     # 验证集比例
-    valid_data_size: float = 0.1
+    valid_data_size: float = 0.0
     # 验证间隔
     valid_interval: int = 100
     # inference device id
@@ -609,14 +609,14 @@ _CONFIGS = [
         model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=25, max_token_len=180, output_format = "traj"),
 
         data=LeRobotLiberoDataConfig(
-            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
+            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。  # noqa: RUF003
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                root="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
-                repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0728",
+                root="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
+                repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
             ),
         ),
         output_format = "traj",
@@ -736,7 +736,7 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
-            peak_lr=1e-5,
+            peak_lr=5e-5,
             decay_steps=1_000_000,
             decay_lr=5e-5,
         ),
