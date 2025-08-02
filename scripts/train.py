@@ -335,23 +335,6 @@ def main(config: _config.TrainConfig):
     valid_data_iter = iter(valid_loader)
     batch = next(train_data_iter)
 
-    # test vis action
-    # obs, action = batch
-    # img = obs.images['base_0_rgb'][0] + 1.
-    # from PIL import Image
-    # img = np.asarray(np.clip(img, 0.0, 1.0) * 255.).astype(np.uint8)
-    # action_chunk = action[0, :, :8]
-    # x = range(25)
-    # import matplotlib.pyplot as plt
-    # for i in range(8):
-    #     plt.plot(x, action_chunk[:, i], linestyle='-', label=f'{i}')
-    # # 显示网格和图例
-    # plt.grid(True)
-    # plt.legend()
-    # plt.imsave('img.png', img)
-    # # 保存图像到文件
-    # plt.savefig('1t.png', dpi=300, bbox_inches='tight')  # 保存为 PNG，分辨率 300 DPI
-
     logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
     logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
 
@@ -436,7 +419,7 @@ if __name__ == "__main__":
         "pi0_bridge_traj",
         "--overwrite",
         "--data.repo-id",
-        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
+        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
     ]
 
     main(_config.cli())

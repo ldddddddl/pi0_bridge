@@ -8,7 +8,7 @@ from openpi.models import model as _model
 
 
 def make_libero_example() -> dict:
-    """Creates a random input example for the Libero policy."""
+    """为Libero策略创建一个随机输入示例。"""
     return {
         "observation/state": np.random.rand(8),
         "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
@@ -29,71 +29,70 @@ def _parse_image(image) -> np.ndarray:
 @dataclasses.dataclass(frozen=True)
 class LiberoInputs(transforms.DataTransformFn):
     """
-    This class is used to convert inputs to the model to the expected format. It is used for both training and inference.
+    此类用于将模型输入转换为预期格式。它用于训练和推理。
 
-    For your own dataset, you can copy this class and modify the keys based on the comments below to pipe
-    the correct elements of your dataset into the model.
+    对于您自己的数据集，您可以复制此类并根据下面的注释修改键，以将数据集的正确元素传输到模型中。
     """
 
-    # The action dimension of the model. Will be used to pad state and actions for pi0 model (not pi0-FAST).
-    # Do not change this for your own dataset.
+    # 模型的动作维度。将用于为pi0模型（非pi0-FAST）填充状态和动作。
+    # 对于您自己的数据集，请勿更改此值。
     action_dim: int
 
-    # Determines which model will be used.
-    # Do not change this for your own dataset.
+    # 确定将使用哪个模型。
+    # 对于您自己的数据集，请勿更改此值。
     model_type: _model.ModelType = _model.ModelType.PI0
 
     def __call__(self, data: dict) -> dict:
-        # We only mask padding for pi0 model, not pi0-FAST. Do not change this for your own dataset.
+        # 我们只对pi0模型进行填充掩码，而不是pi0-FAST。对于您自己的数据集，请勿更改此值。
         mask_padding = self.model_type == _model.ModelType.PI0
 
-        # We pad the proprioceptive input to the action dimension of the model.
-        # For pi0-FAST, we don't pad the state. For Libero, we don't need to differentiate
-        # since the pi0-FAST action_dim = 7, which is < state_dim = 8, so pad is skipped.
-        # Keep this for your own dataset, but if your dataset stores the proprioceptive input
-        # in a different key than "observation/state", you should change it below.
+        # 我们将本体感受输入填充到模型的动作维度。
+        # 对于pi0-FAST，我们不填充状态。对于Libero，我们不需要区分，
+        # 因为pi0-FAST的action_dim = 7，小于state_dim = 8，所以跳过填充。
+        # 为您的数据集保留此设置，但如果您的数据集将本体感受输入存储在不同的键中
+        # 而不是"observation/state"，您应该更改下面的键。
         state = transforms.pad_to_dim(data["observation/state"], self.action_dim)
 
-        # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
-        # stores as float32 (C,H,W), gets skipped for policy inference.
-        # Keep this for your own dataset, but if your dataset stores the images
-        # in a different key than "observation/image" or "observation/wrist_image",
-        # you should change it below.
-        # Pi0 models support three image inputs at the moment: one third-person view,
-        # and two wrist views (left and right). If your dataset does not have a particular type
-        # of image, e.g. wrist images, you can comment it out here and replace it with zeros like we do for the
-        # right wrist image below.
+        # 可能需要将图像解析为uint8 (H,W,C)，因为LeRobot自动存储为float32 (C,H,W)，
+        # 策略推理时会跳过此步骤。
+        # 为您的数据集保留此设置，但如果您的数据集将图像存储在不同的键中
+        # 而不是"observation/image"或"observation/wrist_image"，
+        # 您应该更改下面的键。
+        # Pi0模型目前支持三种图像输入：一个第三人称视角，
+        # 和两个手腕视角（左和右）。如果您的数据集没有特定类型的图像，
+        # 例如手腕图像，您可以在此处注释掉它，并用零数组替换它，就像我们对
+        # 右手腕图像所做的那样。
         base_image = _parse_image(data["observation/image"])
         wrist_image = _parse_image(data["observation/wrist_image"])
 
-        # Create inputs dict. Do not change the keys in the dict below.
+        # 创建输入字典。请勿更改下面字典中的键。
         inputs = {
             "state": state,
             "image": {
                 "base_0_rgb": base_image,
                 "left_wrist_0_rgb": wrist_image,
-                # Pad any non-existent images with zero-arrays of the appropriate shape.
+                # 用适当形状的零数组填充任何不存在的图像。
                 "right_wrist_0_rgb": np.zeros_like(base_image),
             },
             "image_mask": {
                 "base_0_rgb": np.True_,
                 "left_wrist_0_rgb": np.True_,
-                # Mask any non-existent images with False (if ``mask_padding`` is True).
+                # 如果``mask_padding``为True，则用False掩码任何不存在的图像。
                 "right_wrist_0_rgb": np.False_ if mask_padding else np.True_,
             },
         }
 
-        # Pad actions to the model action dimension. Keep this for your own dataset.
-        # Actions are only available during training.
+        # 将动作填充到模型动作维度。为您的数据集保留此设置。
+        # 动作仅在训练期间可用。
         if "actions" in data:
-            # We are padding to the model action dim.
-            # For pi0-FAST, this is a no-op (since action_dim = 7).
+            # 我们正在填充到模型动作维度。
+            # 对于pi0-FAST，这是无操作（因为action_dim = 7）。
             actions = transforms.pad_to_dim(data["actions"], self.action_dim)
             inputs["actions"] = actions
 
-        # Pass the prompt (aka language instruction) to the model.
-        # Keep this for your own dataset (but modify the key if the instruction is not
-        # stored in "prompt"; the output dict always needs to have the key "prompt").
+        # 将提示（即语言指令）传递给模型。
+        # 为您的数据集保留此设置（但如果指令不是存储在"prompt"中，请修改键；
+        # 输出字典始终需要具有键"prompt"）。
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
 
@@ -103,32 +102,30 @@ class LiberoInputs(transforms.DataTransformFn):
 @dataclasses.dataclass(frozen=True)
 class LiberoOutputs(transforms.DataTransformFn):
     """
-    This class is used to convert outputs from the model back the the dataset specific format. It is
-    used for inference only.
+    此类用于将模型输出转换回数据集特定格式。它仅用于推理。
 
-    For your own dataset, you can copy this class and modify the action dimension based on the comments below.
+    对于您自己的数据集，您可以复制此类并根据下面的注释修改动作维度。
     """
 
     def __call__(self, data: dict) -> dict:
-        # Only return the first N actions -- since we padded actions above to fit the model action
-        # dimension, we need to now parse out the correct number of actions in the return dict.
-        # For pi0_bridge, we return the first 8 actions (since the model is 8-dimensional).
-        # For your own dataset, replace `8` with the action dimension of your dataset.
-        return {"actions": np.asarray(data["actions"][:, :8])}
+        # 只返回前N个动作——由于我们上面将动作填充到模型动作维度，
+        # 我们现在需要在返回字典中解析出正确数量的动作。
+        # 对于pi0_bridge，我们返回前8个动作（因为模型是8维的）。
+        # 对于您自己的数据集，用数据集的动作维度替换`8`。
+        return {"actions": np.asarray(data["actions"][:, :7])}
 
 
 @dataclasses.dataclass(frozen=True)
 class BridgeOutputs(transforms.DataTransformFn):
     """
-    This class is used to convert outputs from the model back the the dataset specific format. It is
-    used for inference only.
+    此类用于将模型输出转换回数据集特定格式。它仅用于推理。
 
-    For pi0_bridge, we return the first 8 actions (since the model is 8-dimensional).
+    对于pi0_bridge，我们返回前8个动作（因为模型是8维的）。
     """
 
     def __call__(self, data: dict) -> dict:
-        # Only return the first N actions -- since we padded actions above to fit the model action
-        # dimension, we need to now parse out the correct number of actions in the return dict.
-        # For pi0_bridge, we return the first 8 actions (since the model is 8-dimensional).
-        # For your own dataset, replace `8` with the action dimension of your dataset.
-        return {"actions": np.asarray(data["actions"][:, :8])}
+        # 只返回前N个动作——由于我们上面将动作填充到模型动作维度，
+        # 我们现在需要在返回字典中解析出正确数量的动作。
+        # 对于pi0_bridge，我们返回前8个动作（因为模型是8维的）。
+        # 对于您自己的数据集，用数据集的动作维度替换`8`。
+        return {"actions": np.asarray(data["actions"][:, :7])}

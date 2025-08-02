@@ -74,10 +74,10 @@ class Pi0Config(_model.BaseModelConfig):
     action_expert_variant: _gemma.Variant = "gemma_300m"
 
     # 设置模型特定的默认值
-    action_dim: int = 8
+    action_dim: int = 7
     action_horizon: int = 50
     max_token_len: int = 48
-    end_pos_dim: int = 8
+    end_pos_dim: int = 7
     output_format: str = "traj"
 
     @property

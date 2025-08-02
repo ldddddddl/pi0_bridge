@@ -19,8 +19,10 @@ uv run examples/bridge/convert_bridge_data_to_lerobot.py --data_dir /path/to/you
 import os
 from pathlib import Path
 import pickle
+import re
 import shutil
 
+# import cv2
 from einops import rearrange
 
 # from lerobot.common.datasets.lerobot_dataset import LEROBOT_HOME
@@ -62,6 +64,7 @@ PCD2RGB = False
 HORIZON = "1"
 
 DOBOT_CR5_JOINTS = [360, 360, 160, 360, 360, 360]
+is_use_delta_pose = True
 
 def read_episode_data(episode_path):
     """
@@ -141,7 +144,7 @@ def process_depth_from_file(depth_path):
     return depth.astype(np.float32)
 
 
-def convert_pose_to_gripper_state(pose_data):
+def convert_pose_to_gripper_state(pose_data, index: int=0):
     """
     将pose数据转换为gripper状态
     Args:
@@ -150,11 +153,11 @@ def convert_pose_to_gripper_state(pose_data):
         dict: 包含position, orientation, claw_status等字段
     """
     # end_pose格式: (x, y, z, rx, ry, rz)
-    position = list(pose_data["end_pose"][:3])  # 前3个是位置
-    orientation = list(pose_data["end_pose"][3:])  # 后3个是欧拉角
-    joint_state = list(np.array(pose_data["joint"]) / np.array(DOBOT_CR5_JOINTS))
+    position = list(pose_data[index]["end_pose"][:3])  # 前3个是位置
+    orientation = list(pose_data[index]["end_pose"][3:])  # 后3个是欧拉角
+    joint_state = list(np.array(pose_data[index]["joint"]) / np.array(DOBOT_CR5_JOINTS))
     # 根据degree判断夹爪状态，90度通常是关闭状态
-    claw_status = 1 if pose_data["degree"] > 89 else 0
+    claw_status = 1 if pose_data[index]["degree"] > 89 else 0
 
     return {
         "position": position,
@@ -162,8 +165,44 @@ def convert_pose_to_gripper_state(pose_data):
         "joint": joint_state,
         "claw_status": claw_status,
         "arm_flag": 0,  # 默认值
-        "timestamp": pose_data["timestamp"]
+        "timestamp": pose_data[index]["timestamp"]
     }
+
+def convert_pose_to_delta_pose(pose_data, index: int):
+    """
+    将pose数据转换为delta_pose
+    Args:
+        pose_data: dict, 包含end_pose, joint, degree等字段
+    Returns:
+        dict: 包含position, orientation, claw_status等字段
+    """
+    # end_pose格式: (x, y, z, rx, ry, rz)
+    current_position = list(pose_data[index]["end_pose"])  # 前3个是位置
+    current_joint_state = list(np.array(pose_data[index]["joint"]) / np.array(DOBOT_CR5_JOINTS))
+    next_position = list(pose_data[index+1]["end_pose"])  # 前3个是位置
+    next_joint_state = list(np.array(pose_data[index+1]["joint"]) / np.array(DOBOT_CR5_JOINTS))
+
+    delta_position = np.array(next_position) - np.array(current_position)
+    delta_position = np.clip(delta_position, -100, 100)
+    for i, p in enumerate(delta_position):
+        abs_delta = DOBOT_CR5_JOINTS[i] - abs(p) # abs_delta >= 0
+        if p > 300 or p < -300:
+            if current_position[i] >= 0:
+                delta_position[i] = abs_delta
+            else:
+                delta_position[i] = -abs_delta
+    delta_joint_state = np.array(next_joint_state) - np.array(current_joint_state)
+    # 根据degree判断夹爪状态，90度通常是关闭状态
+    claw_status = 1 if pose_data[index]["degree"] > 89 else 0
+
+    return {
+        "position": delta_position,
+        "joint": delta_joint_state,
+        "claw_status": np.array([claw_status]),
+        "arm_flag": 0,  # 默认值
+        "timestamp": pose_data[index]["timestamp"]
+    }
+
 
 def downsample_nn(img, out_h=224, out_w=224):
     """下采样图像到指定大小。
@@ -226,7 +265,7 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
             },
             "state": {
                 "dtype": "float32",
-                "shape": (8 * horizon,),  # 修改为horizon倍的长度
+                "shape": (7 * horizon,),  # 修改为horizon倍的长度
                 "names": ["state"],
             },
             "lang_goal": {
@@ -236,7 +275,7 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
             },
             "action": {
                 "dtype": "float32",
-                "shape": (8 * horizon,),  # 修改为horizon倍的长度
+                "shape": (7 * horizon,),  # 修改为horizon倍的长度
                 "names": ["action"],
             },
         },
@@ -262,7 +301,9 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
 
         # 读取episode数据
         episode_data = read_episode_data(task_path)
-        task_name = episode_data["task_name"]
+        ##
+        task_name = episode_data["task_name"][:-2]
+        task_name = re.sub(r'[_\d]', ' ', task_name)
         episode_list = episode_data["episode_data"]
 
         # 获取图像和深度图路径
@@ -280,8 +321,12 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
 
         # 转换episode数据为gripper_pose格式
         gripper_pose = []
-        for step_data in episode_list:
-            gripper_pose.append(convert_pose_to_gripper_state(step_data))
+        for index in range(len(episode_list) - 1):
+            if is_use_delta_pose:
+                gripper_pose.append(convert_pose_to_delta_pose(episode_list, index))
+
+            else:
+                gripper_pose.append(convert_pose_to_gripper_state(episode_list, index))
 
         # ## test
         # endpos_list = []
@@ -289,13 +334,13 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
         # gripper_list = []
         # for ep in gripper_pose:
         #     endpos_list.append(ep['position'])
-        #     jointpos_list.append(ep['orientation'])
+        #     # jointpos_list.append(ep['orientation'])
         #     gripper_list.append(ep['claw_status'])
         # import matplotlib.pyplot as plt
         # x = range(len(endpos_list))
         # # 绘制三条曲线
         # plt.plot(x, endpos_list, linestyle='-', label='endpos')
-        # plt.plot(x, jointpos_list, linestyle='--', label='joint')
+        # # plt.plot(x, jointpos_list, linestyle='--', label='joint')
         # plt.plot(x, gripper_list, linestyle='-.', label='gripper')
 
         # # 添加标题和轴标签
@@ -308,11 +353,14 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
         # plt.legend()
 
         # # 保存图像到文件
-        # plt.savefig('three_series_plot.png', dpi=300, bbox_inches='tight')  
+        # plt.savefig('three_series_plot_abs.png', dpi=300, bbox_inches='tight')  
 
         # 根据horizon参数处理数据
         assert horizon > 0
-        max_frames = (min_steps - 1) // horizon  # 减1是因为最后一步没有action
+        if is_use_delta_pose:
+            max_frames = (min_steps - 1) // horizon - 1  # 减1是因为最后一步没有action
+        else:
+            max_frames = (min_steps - 1) // horizon  # 减1是因为最后一步没有action
 
         print(f"Creating {max_frames} frames with horizon={horizon}")
 
@@ -337,17 +385,23 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
 
             for step in range(start_step, end_step):
                 # 处理gripper pose
-                state = get_gripper_pos(gripper_pose=gripper_pose, step=step)
-                gripper_pose_full = get_gripper_pos(gripper_pose=gripper_pose, step=step+1)
-                joint_states.append(gripper_pose[step]['joint'] + [0, 0])
-                states.append(state)
-                actions.append(gripper_pose_full)
+                if is_use_delta_pose:
+                    state = np.concatenate([gripper_pose[step]["position"], gripper_pose[step]["claw_status"]], axis=0, dtype=np.float32)
+                    action = np.concatenate([gripper_pose[step+1]["position"], gripper_pose[step+1]["claw_status"]], axis=0, dtype=np.float32)
+                    joint_states.append(np.concatenate([gripper_pose[step]['joint'], gripper_pose[step]["claw_status"]], axis=0, dtype=np.float32))
+                    states.append(state)
+                    actions.append(action)
+                else:
+                    state = get_gripper_pos(gripper_pose=gripper_pose, step=step)
+                    gripper_pose_full = get_gripper_pos(gripper_pose=gripper_pose, step=step+1)
+                    joint_states.append(gripper_pose[step]['joint'] + [0, 0])
+                    states.append(state)
+                    actions.append(gripper_pose_full)
 
             # 将states和actions展平为一维数组
             states_flat = np.concatenate(states)
             actions_flat = np.concatenate(actions)
             joint_states_flat = np.concatenate(joint_states, dtype=np.float32)
-            # ttt = states_flat + joint_states_flat
             # 添加帧到数据集
             dataset.add_frame(
                 {
@@ -355,9 +409,9 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
                     "wrist_image": wrist_rgb,
                     # "depth": depth,
                     "state": states_flat,
-                    "lang_goal": task_name.strip(),
+                    "lang_goal": task_name,
                     "action": actions_flat,
-                    "task": task,
+                    "task": task_name,
                 }
             )
 
@@ -383,7 +437,7 @@ if __name__ == "__main__":
     sys.argv = [
         sys.argv[0],  # 脚本名
         # "--data_dir", '/home/BridgeVLA/data/202507013',  # 数据目录
-        "--data_dir", "/home/lpy/vla/pi0_bridge/datasets/pi0_0729",  # 数据目录
+        "--data_dir", "/home/lpy/vla/pi0_bridge/datasets/pi0_0730",  # 数据目录
 
         "--device", device,
         "--horizon", HORIZON,  # 添加horizon参数

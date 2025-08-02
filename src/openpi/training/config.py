@@ -6,6 +6,7 @@ import dataclasses
 import difflib
 import logging
 import pathlib
+from pathlib import Path
 from typing import Any, Protocol, TypeAlias
 
 import etils.epath as epath
@@ -31,6 +32,7 @@ ModelType: TypeAlias = _model.ModelType
 # 解决直接使用 nnx.filterlib.Filter 的 tyro 问题
 Filter: TypeAlias = nnx.filterlib.Filter
 
+HOME = str(Path.home())
 
 @dataclasses.dataclass(frozen=True)
 class AssetsConfig:
@@ -409,14 +411,14 @@ class TrainConfig:
     # 但会增加内存和 CPU 使用率。
     num_workers: int = 2
     # 要运行的训练步骤（批次）数
-    num_train_steps: int = 10_000
+    num_train_steps: int = 30_000
 
     # 记录训练指标的频率（以步骤为单位）
     log_interval: int = 200
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 5000
+    save_interval: int = 10000
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
-    keep_period: int | None = 5000
+    keep_period: int | None = 10000
 
     # 如果为 true，如果检查点目录存在，它将被覆盖。
     overwrite: bool = True
@@ -436,7 +438,7 @@ class TrainConfig:
     fsdp_devices: int = 4
 
     # 末端位置维度
-    end_pos_dim: int = 8
+    end_pos_dim: int = 7
     # 输出格式
     output_format: str = "traj"
     # 验证集比例
@@ -582,14 +584,14 @@ _CONFIGS = [
         # 对于您自己的数据集，您可以更改 repo_id 以指向您的数据集。
         # 同时修改 DataConfig 以使用您在上面为您的数据集创建的新配置。
         data=LeRobotLiberoDataConfig(
-            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi00725",
+            repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi00725",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。  # noqa: RUF003
                 prompt_from_task=True,
-                root="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi00725",
-                repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi00725",
+                root=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi00725",
+                repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi00725",
             ),
         ),
         # 定义要加载哪个预训练检查点来初始化模型。
@@ -606,17 +608,17 @@ _CONFIGS = [
         # 更改名称以反映您的模型和数据集。
         name="pi0_bridge_traj",
 
-        model=pi0.Pi0Config(action_dim=32, end_pos_dim=8, action_horizon=25, max_token_len=180, output_format = "traj"),
+        model=pi0.Pi0Config(action_dim=32, end_pos_dim=7, action_horizon=25, max_token_len=180, output_format = "traj"),
 
         data=LeRobotLiberoDataConfig(
-            repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
+            repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。  # noqa: RUF003
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                root="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
-                repo_id="/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0729",
+                root=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
+                repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
             ),
         ),
         output_format = "traj",
