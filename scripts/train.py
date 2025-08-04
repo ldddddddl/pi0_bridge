@@ -3,6 +3,8 @@ import datetime
 import functools
 import logging
 import platform
+import os
+import sys
 from typing import Any
 
 import etils.epath as epath
@@ -42,7 +44,55 @@ class Subset:
         return len(self.indices)
 
 
-def init_logging():
+def init_distributed_environment():
+    """初始化分布式训练环境"""
+    # 设置分布式训练环境变量
+    if "SLURM_PROCID" in os.environ:
+        # SLURM环境
+        rank = int(os.environ["SLURM_PROCID"])
+        world_size = int(os.environ["SLURM_NTASKS"])
+        local_rank = int(os.environ["SLURM_LOCALID"])
+        node_rank = int(os.environ["SLURM_NODEID"])
+        
+        # 设置JAX分布式环境
+        os.environ["JAX_PLATFORM_NAME"] = "gpu"
+        os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
+        
+        # 设置分布式训练端口
+        if "MASTER_PORT" not in os.environ:
+            os.environ["MASTER_PORT"] = "29500"
+        if "MASTER_ADDR" not in os.environ:
+            os.environ["MASTER_ADDR"] = os.environ.get("SLURM_LAUNCH_NODE_IPADDR", "localhost")
+            
+    elif "RANK" in os.environ:
+        # 手动设置的环境变量
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        local_rank = int(os.environ.get("LOCAL_RANK", rank))
+        node_rank = int(os.environ.get("NODE_RANK", 0))
+        
+    else:
+        # 单机训练
+        rank = 0
+        world_size = 1
+        local_rank = 0
+        node_rank = 0
+    
+    # 设置CUDA设备
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+    
+    return {
+        "rank": rank,
+        "world_size": world_size,
+        "local_rank": local_rank,
+        "node_rank": node_rank,
+        "is_distributed": world_size > 1
+    }
+
+
+def init_logging(dist_info):
     """Custom logging format for better readability."""
     level_mapping = {"DEBUG": "D", "INFO": "I", "WARNING": "W", "ERROR": "E", "CRITICAL": "C"}
 
@@ -52,16 +102,26 @@ def init_logging():
             return super().format(record)
 
     formatter = CustomFormatter(
-        fmt="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)-80s (%(process)d:%(filename)s:%(lineno)s)",
+        fmt=f"%(asctime)s.%(msecs)03d [%(levelname)s] [R{dist_info['rank']}/W{dist_info['world_size']}] %(message)-80s (%(process)d:%(filename)s:%(lineno)s)",
         datefmt="%H:%M:%S",
     )
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    logger.handlers[0].setFormatter(formatter)
+    if logger.handlers:
+        logger.handlers[0].setFormatter(formatter)
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
 
-def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = False, enabled: bool = True):
+def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = False, enabled: bool = True, dist_info=None):
+    # 只在主进程上初始化wandb
+    if dist_info and dist_info["rank"] != 0:
+        wandb.init(mode="disabled")
+        return
+        
     ct = datetime.datetime.now()
     strf_time = ct.strftime("%Y-%m-%d-%H-%M-%S")
 
@@ -270,8 +330,11 @@ def valid_step(
 
 
 def main(config: _config.TrainConfig):
-    init_logging()
-    logging.info(f"Running on: {platform.node()}")
+    # 初始化分布式环境
+    dist_info = init_distributed_environment()
+    init_logging(dist_info)
+    
+    logging.info(f"Running on: {platform.node()} (Rank {dist_info['rank']}/{dist_info['world_size']})")
 
     if config.batch_size % jax.device_count() != 0:
         raise ValueError(
@@ -293,7 +356,7 @@ def main(config: _config.TrainConfig):
         overwrite=config.overwrite,
         resume=config.resume,
     )
-    init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
+    init_wandb(config, resuming=resuming, enabled=config.wandb_enabled, dist_info=dist_info)
     # breakpoint()
     valid_data_size = config.valid_data_size  # 验证集比例
     valid_interval = config.valid_interval  # 每多少步验证一次
@@ -338,12 +401,13 @@ def main(config: _config.TrainConfig):
     logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
     logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
 
-    # Log images from first batch to sanity check.
-    images_to_log = [
-        wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
-        for i in range(min(5, len(next(iter(batch[0].images.values())))))
-    ]
-    wandb.log({"camera_views": images_to_log}, step=0)
+    # Log images from first batch to sanity check (only on main process)
+    if dist_info["rank"] == 0:
+        images_to_log = [
+            wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
+            for i in range(min(5, len(next(iter(batch[0].images.values())))))
+        ]
+        wandb.log({"camera_views": images_to_log}, step=0)
 
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
     jax.block_until_ready(train_state)
@@ -365,6 +429,7 @@ def main(config: _config.TrainConfig):
         initial=start_step,
         total=config.num_train_steps,
         dynamic_ncols=True,
+        disable=dist_info["rank"] != 0,  # 只在主进程显示进度条
     )
 
     infos = []
@@ -376,8 +441,9 @@ def main(config: _config.TrainConfig):
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
-            pbar.write(f"Step {step}: {info_str}")
-            wandb.log(reduced_info, step=step)
+            if dist_info["rank"] == 0:  # 只在主进程打印日志
+                pbar.write(f"Step {step}: {info_str}")
+                wandb.log(reduced_info, step=step)
             infos = []
         # 每valid_interval步进行一次验证
         if step % valid_interval == 0 and valid_len > 0:
@@ -388,18 +454,22 @@ def main(config: _config.TrainConfig):
                 valid_batch = next(valid_data_iter)
             valid_info = valid_step(config, train_rng, train_state, valid_batch)
             valid_info = jax.device_get(valid_info)
-            pbar.write(f"Step {step}: valid_loss={valid_info['valid_total_loss']:.4f}")
-            wandb.log(valid_info, step=step)
+            if dist_info["rank"] == 0:  # 只在主进程打印验证日志
+                pbar.write(f"Step {step}: valid_loss={valid_info['valid_total_loss']:.4f}")
+                wandb.log(valid_info, step=step)
         try:
             batch = next(train_data_iter)
         except StopIteration:
             train_data_iter = iter(train_loader)
             batch = next(train_data_iter)
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
+            # 只在主进程保存检查点
+            if dist_info["rank"] == 0:
+                _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
 
     logging.info("Waiting for checkpoint manager to finish")
-    checkpoint_manager.wait_until_finished()
+    if dist_info["rank"] == 0:
+        checkpoint_manager.wait_until_finished()
 
 
 if __name__ == "__main__":

@@ -183,7 +183,7 @@ def convert_pose_to_delta_pose(pose_data, index: int):
     next_joint_state = list(np.array(pose_data[index+1]["joint"]) / np.array(DOBOT_CR5_JOINTS))
 
     delta_position = np.array(next_position) - np.array(current_position)
-    delta_position = np.clip(delta_position, -100, 100)
+    # delta_position = np.clip(delta_position, -100, 100)
     for i, p in enumerate(delta_position):
         abs_delta = DOBOT_CR5_JOINTS[i] - abs(p) # abs_delta >= 0
         if p > 300 or p < -300:
