@@ -29,6 +29,15 @@ The repo has been tested with Ubuntu 22.04, we do not currently support other op
 
 ## Installation
 
+UV installation
+```
+# curl
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# wget  
+wget -qO- https://astral.sh/uv/install.sh | sh
+```
+
 When cloning this repo, make sure to update submodules:
 
 ```bash

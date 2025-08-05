@@ -437,7 +437,7 @@ if __name__ == "__main__":
     sys.argv = [
         sys.argv[0],  # 脚本名
         # "--data_dir", '/home/BridgeVLA/data/202507013',  # 数据目录
-        "--data_dir", "/home/lpy/vla/pi0_bridge/datasets/pi0_0730",  # 数据目录
+        "--data_dir", f"{HOME}/vla/pi0_bridge/datasets/pi0_0730",  # 数据目录
 
         "--device", device,
         "--horizon", HORIZON,  # 添加horizon参数
