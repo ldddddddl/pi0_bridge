@@ -426,7 +426,7 @@ class TrainConfig:
     resume: bool = False
 
     # 如果为 true，将启用 wandb 日志记录
-    wandb_enabled: bool = True
+    wandb_enabled: bool = False
 
     # 用于传递元数据到策略服务器
     policy_metadata: dict[str, Any] | None = None
@@ -611,14 +611,14 @@ _CONFIGS = [
         model=pi0.Pi0Config(action_dim=32, end_pos_dim=7, action_horizon=25, max_token_len=180, output_format = "traj"),
 
         data=LeRobotLiberoDataConfig(
-            repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
+            repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。  # noqa: RUF003
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                root=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
-                repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
+                root=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
+                repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
             ),
         ),
         output_format = "traj",

@@ -72,6 +72,15 @@ def init_distributed_environment():
         local_rank = int(os.environ.get("LOCAL_RANK", rank))
         node_rank = int(os.environ.get("NODE_RANK", 0))
         
+        # 设置JAX分布式环境变量
+        os.environ["JAX_PLATFORM_NAME"] = "gpu"
+        os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
+        
+        # 设置JAX分布式训练环境变量
+        os.environ["JAX_COORDINATOR_ADDRESS"] = os.environ.get("MASTER_ADDR", "localhost")
+        os.environ["JAX_COORDINATOR_PORT"] = os.environ.get("MASTER_PORT", "29500")
+        
     else:
         # 单机训练
         rank = 0
@@ -82,6 +91,25 @@ def init_distributed_environment():
     # 设置CUDA设备
     if "CUDA_VISIBLE_DEVICES" not in os.environ:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+    
+    # 如果是分布式训练，初始化JAX分布式环境
+    if world_size > 1:
+        try:
+            # 设置JAX分布式环境变量
+            os.environ["JAX_COORDINATOR_ADDRESS"] = os.environ.get("MASTER_ADDR", "localhost")
+            os.environ["JAX_COORDINATOR_PORT"] = os.environ.get("MASTER_PORT", "29500")
+            
+            # 初始化JAX分布式环境 - 这会阻塞直到所有进程都启动
+            jax.distributed.initialize(
+                coordinator_address=f"{os.environ.get('MASTER_ADDR', 'localhost')}:{os.environ.get('MASTER_PORT', '29500')}",
+                num_processes=world_size,
+                process_id=rank,
+                local_device_ids=[local_rank]
+            )
+            print(f"JAX分布式初始化成功: rank={rank}/{world_size}, process_count={jax.process_count()}, process_index={jax.process_index()}")
+        except Exception as e:
+            print(f"JAX分布式初始化失败: {e}")
+            raise
     
     return {
         "rank": rank,
@@ -330,12 +358,18 @@ def valid_step(
 
 
 def main(config: _config.TrainConfig):
+    print("[Debug] 进入 main() 函数")
     # 初始化分布式环境
+    print("[Debug] 开始分布式环境初始化")
     dist_info = init_distributed_environment()
+    print(f"[Debug] 分布式环境初始化完成: rank={dist_info['rank']}, world_size={dist_info['world_size']}, local_rank={dist_info['local_rank']}, node_rank={dist_info['node_rank']}, is_distributed={dist_info['is_distributed']}")
     init_logging(dist_info)
     
     logging.info(f"Running on: {platform.node()} (Rank {dist_info['rank']}/{dist_info['world_size']})")
+    logging.info(f"JAX process_count: {jax.process_count()}, process_index: {jax.process_index()}")
+    logging.info(f"JAX device_count: {jax.device_count()}, local_device_count: {jax.local_device_count()}")
 
+    print(f"[Debug][Rank {dist_info['rank']}] 开始数据加载配置")
     if config.batch_size % jax.device_count() != 0:
         raise ValueError(
             f"Batch size {config.batch_size} must be divisible by the number of devices {jax.device_count()}."
@@ -350,6 +384,7 @@ def main(config: _config.TrainConfig):
     data_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(sharding.DATA_AXIS))
     replicated_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
+    print(f"[Debug][Rank {dist_info['rank']}] 开始检查点管理和wandb初始化")
     checkpoint_manager, resuming = _checkpoints.initialize_checkpoint_dir(
         config.checkpoint_dir,
         keep_period=config.keep_period,
@@ -357,13 +392,15 @@ def main(config: _config.TrainConfig):
         resume=config.resume,
     )
     init_wandb(config, resuming=resuming, enabled=config.wandb_enabled, dist_info=dist_info)
+    print(f"[Debug][Rank {dist_info['rank']}] 检查点和wandb初始化完成")
     # breakpoint()
     valid_data_size = config.valid_data_size  # 验证集比例
     valid_interval = config.valid_interval  # 每多少步验证一次
 
-    # 加载完整数据集
+    print(f"[Debug][Rank {dist_info['rank']}] 开始加载完整数据集")
     full_data_config = config.data.create(config.assets_dirs, config.model)
     full_dataset = _data_loader.create_torch_dataset(full_data_config, config.model.action_horizon, config.model)
+    print(f"[Debug][Rank {dist_info['rank']}] 完整数据集加载完成，样本数: {len(full_dataset)}")
     full_len = len(full_dataset)
     valid_len = int(full_len * valid_data_size)
     train_len = full_len - valid_len
@@ -391,12 +428,17 @@ def main(config: _config.TrainConfig):
         # DataLoaderImpl包装，返回(Observation, Actions)
         return _data_loader.DataLoaderImpl(full_data_config, torch_loader)
 
-    train_loader = make_loader(train_dataset, True, data_sharding, config.batch_size, config.num_workers, config.seed)
+    print(f"[Debug][Rank {dist_info['rank']}] 开始创建train_loader和valid_loader")
+    num_workers = 0 if dist_info["is_distributed"] else config.num_workers
+    train_loader = make_loader(train_dataset, True, data_sharding, config.batch_size, num_workers, config.seed)
     valid_loader = make_loader(valid_dataset, False, data_sharding, config.batch_size, 0, config.seed + 1)
+    print(f"[Debug][Rank {dist_info['rank']}] train_loader和valid_loader创建完成")
 
     train_data_iter = iter(train_loader)
     valid_data_iter = iter(valid_loader)
+    print(f"[Debug][Rank {dist_info['rank']}] 开始获取第一个batch")
     batch = next(train_data_iter)
+    print(f"[Debug][Rank {dist_info['rank']}] 第一个batch获取完成")
 
     logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
     logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
@@ -409,13 +451,19 @@ def main(config: _config.TrainConfig):
         ]
         wandb.log({"camera_views": images_to_log}, step=0)
 
+    print(f"[Debug][Rank {dist_info['rank']}] 开始模型初始化和权重加载")
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
+    print(f"[Debug][Rank {dist_info['rank']}] 模型初始化完成，等待进程就绪")
     jax.block_until_ready(train_state)
     logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
+    print(f"[Debug][Rank {dist_info['rank']}] 模型初始化和权重加载完成")
 
     if resuming:
+        print(f"[Debug][Rank {dist_info['rank']}] 恢复训练状态")
         train_state = _checkpoints.restore_state(checkpoint_manager, train_state, train_loader)
+        print(f"[Debug][Rank {dist_info['rank']}] 训练状态恢复完成")
 
+    print(f"[Debug][Rank {dist_info['rank']}] 开始训练主循环")
     ptrain_step = jax.jit(
         functools.partial(train_step, config),
         in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
@@ -479,7 +527,7 @@ if __name__ == "__main__":
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "4, 5, 6, 7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
@@ -489,7 +537,7 @@ if __name__ == "__main__":
         "pi0_bridge_traj",
         "--overwrite",
         "--data.repo-id",
-        "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
+        "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
     ]
 
     main(_config.cli())

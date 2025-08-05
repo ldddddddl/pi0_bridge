@@ -223,6 +223,6 @@ main_menu() {
 }
 
 # 如果直接运行脚本，显示主菜单
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [ "${BASH_SOURCE:-$0}" = "$0" ]; then
     main_menu
 fi 

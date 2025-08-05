@@ -47,7 +47,7 @@ for node_rank in $(seq 0 $((NUM_NODES-1))); do
             pi0_bridge_traj \
             --exp-name "multi_node_training" \
             --overwrite \
-            --data.repo-id "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0730" &
+            --data.repo-id "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729" &
         
         # 记录进程ID
         pids[$rank]=$!

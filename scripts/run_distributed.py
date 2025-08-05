@@ -154,11 +154,11 @@ def main():
         # 否则使用默认参数
         script_args = [
             "pi0_bridge_traj",
-            "--exp-name", "distributed_training",
+            "--exp-name", "pi0_bridge_traj",
             "--overwrite",
-            "--data.repo-id", "/home/lpy/vla/pi0_bridge/datasets/converted_dataset/pi0_0730",
+            "--data.repo-id", "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
         ]
-    
+    print(f"script_args: {script_args}")
     # 构建完整的命令
     cmd = [sys.executable, "scripts/train.py"] + script_args
     

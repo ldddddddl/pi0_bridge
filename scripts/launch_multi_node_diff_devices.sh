@@ -2,17 +2,25 @@
 
 # 用法:
 # ./launch_hetero_multi_node.sh <主节点IP> <主节点端口> <本机node_rank> <本机GPU_IDs> <所有进程总数world_size> <本机rank起始值>
-# 例: ./launch_hetero_multi_node.sh 10.1.0.12 29500 0 0,1,3 12 0
+# 例: ./launch_hetero_multi_node.sh
 #     ./launch_hetero_multi_node.sh 10.1.0.12 29500 1 2,3,4,5,6,7,8,9 12 4
 
-set -e
+# ====== 你可以在这里写默认参数 ======
+DEFAULT_MASTER_ADDR="10.1.0.6"
+DEFAULT_MASTER_PORT=29500
+DEFAULT_NODE_RANK=1
+DEFAULT_GPU_IDS="0,1,2,3"
+DEFAULT_WORLD_SIZE=8
+DEFAULT_RANK_START=4
+# ===================================
 
-MASTER_ADDR=${1:-"localhost"}
-MASTER_PORT=${2:-29500}
-NODE_RANK=${3:-0}
-GPU_IDS=${4:-"0,1"}
-WORLD_SIZE=${5:-1}
-RANK_START=${6:-0}
+# 判断是否带参数，带了就用参数，否则用默认
+MASTER_ADDR=${1:-$DEFAULT_MASTER_ADDR}
+MASTER_PORT=${2:-$DEFAULT_MASTER_PORT}
+NODE_RANK=${3:-$DEFAULT_NODE_RANK}
+GPU_IDS=${4:-$DEFAULT_GPU_IDS}
+WORLD_SIZE=${5:-$DEFAULT_WORLD_SIZE}
+RANK_START=${6:-$DEFAULT_RANK_START}
 
 IFS=',' read -ra GPU_ID_ARR <<< "$GPU_IDS"
 NUM_GPUS=${#GPU_ID_ARR[@]}
@@ -24,6 +32,11 @@ echo "本机 GPU IDs: $GPU_IDS"
 echo "本机 rank 起始值: $RANK_START"
 echo "总进程数 world_size: $WORLD_SIZE"
 echo "本机 GPU 数量: $NUM_GPUS"
+
+export MASTER_ADDR
+export MASTER_PORT
+export WORLD_SIZE
+export NODE_RANK
 
 for i in "${!GPU_ID_ARR[@]}"; do
     export CUDA_VISIBLE_DEVICES=${GPU_ID_ARR[$i]}
@@ -37,12 +50,7 @@ for i in "${!GPU_ID_ARR[@]}"; do
         --local-rank $LOCAL_RANK \
         --node-rank $NODE_RANK \
         --master-addr $MASTER_ADDR \
-        --master-port $MASTER_PORT \
-        -- \
-        pi0_bridge_traj \
-        --exp-name "hetero_multi_node" \
-        --overwrite \
-        --data.repo-id "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729" &
+        --master-port $MASTER_PORT &
     pids[$RANK]=$!
 done
 
