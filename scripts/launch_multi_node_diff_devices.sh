@@ -4,6 +4,10 @@
 # ./launch_hetero_multi_node.sh <主节点IP> <主节点端口> <本机node_rank> <本机GPU_IDs> <所有进程总数world_size> <本机rank起始值>
 # 例: ./launch_hetero_multi_node.sh
 #     ./launch_hetero_multi_node.sh 10.1.0.12 29500 1 2,3,4,5,6,7,8,9 12 4
+export MASTER_ADDR=10.1.0.6
+export MASTER_PORT=29500
+export WORLD_SIZE=12
+export NODE_RANK=1
 
 # ====== 你可以在这里写默认参数 ======
 DEFAULT_MASTER_ADDR="10.1.0.6"
@@ -50,7 +54,12 @@ for i in "${!GPU_ID_ARR[@]}"; do
         --local-rank $LOCAL_RANK \
         --node-rank $NODE_RANK \
         --master-addr $MASTER_ADDR \
-        --master-port $MASTER_PORT &
+        --master-port $MASTER_PORT \
+        -- \
+        pi0_bridge_traj \
+        --exp-name "hetero_multi_node" \
+        --overwrite \
+        --data.repo-id "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729" &
     pids[$RANK]=$!
 done
 
