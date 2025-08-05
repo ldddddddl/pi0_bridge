@@ -8,6 +8,13 @@ import jax
 import jax.numpy as jnp
 from train import init_distributed_environment
 
+os.environ["MASTER_ADDR"] = "10.1.0.6"
+os.environ["MASTER_PORT"] = "29500"
+os.environ["WORLD_SIZE"] = "12"
+os.environ["NODE_RANK"] = "1"
+os.environ["RANK"] = "4"
+os.environ["LOCAL_RANK"] = "0"
+
 def test_jax_distributed():
     """测试JAX分布式环境"""
     print("=" * 60)

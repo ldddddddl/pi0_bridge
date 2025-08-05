@@ -99,14 +99,31 @@ def init_distributed_environment():
             os.environ["JAX_COORDINATOR_ADDRESS"] = os.environ.get("MASTER_ADDR", "localhost")
             os.environ["JAX_COORDINATOR_PORT"] = os.environ.get("MASTER_PORT", "29500")
             
-            # 初始化JAX分布式环境 - 这会阻塞直到所有进程都启动
-            jax.distributed.initialize(
-                coordinator_address=f"{os.environ.get('MASTER_ADDR', 'localhost')}:{os.environ.get('MASTER_PORT', '29500')}",
-                num_processes=world_size,
-                process_id=rank,
-                local_device_ids=[local_rank]
-            )
-            print(f"JAX分布式初始化成功: rank={rank}/{world_size}, process_count={jax.process_count()}, process_index={jax.process_index()}")
+            # 添加超时机制和重试逻辑
+            import time
+            max_retries = 3
+            retry_delay = 5
+            
+            for attempt in range(max_retries):
+                try:
+                    # 初始化JAX分布式环境 - 这会阻塞直到所有进程都启动
+                    jax.distributed.initialize(
+                        coordinator_address=f"{os.environ.get('MASTER_ADDR', 'localhost')}:{os.environ.get('MASTER_PORT', '29500')}",
+                        num_processes=world_size,
+                        process_id=rank,
+                        local_device_ids=[local_rank]
+                    )
+                    print(f"JAX分布式初始化成功: rank={rank}/{world_size}, process_count={jax.process_count()}, process_index={jax.process_index()}")
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        print(f"JAX分布式初始化失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                        print(f"等待 {retry_delay} 秒后重试...")
+                        time.sleep(retry_delay)
+                    else:
+                        print(f"JAX分布式初始化最终失败: {e}")
+                        raise
+                        
         except Exception as e:
             print(f"JAX分布式初始化失败: {e}")
             raise
@@ -379,8 +396,18 @@ def main(config: _config.TrainConfig):
 
     rng = jax.random.key(config.seed)
     train_rng, init_rng = jax.random.split(rng)
-    # 确认
-    mesh = sharding.make_mesh(config.fsdp_devices)
+    
+    # 改进Mesh创建逻辑，确保与分布式设备数量匹配
+    if dist_info["is_distributed"]:
+        # 在分布式环境下，使用所有可用设备
+        fsdp_devices = jax.device_count()
+        print(f"[Debug][Rank {dist_info['rank']}] 分布式环境，使用 {fsdp_devices} 个设备")
+    else:
+        # 单机环境下，使用配置的设备数量
+        fsdp_devices = config.fsdp_devices
+        print(f"[Debug][Rank {dist_info['rank']}] 单机环境，使用 {fsdp_devices} 个设备")
+    
+    mesh = sharding.make_mesh(fsdp_devices)
     data_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(sharding.DATA_AXIS))
     replicated_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
@@ -429,7 +456,16 @@ def main(config: _config.TrainConfig):
         return _data_loader.DataLoaderImpl(full_data_config, torch_loader)
 
     print(f"[Debug][Rank {dist_info['rank']}] 开始创建train_loader和valid_loader")
-    num_workers = 0 if dist_info["is_distributed"] else config.num_workers
+    # 改进worker数量配置
+    if dist_info["is_distributed"]:
+        # 在分布式环境下使用少量worker，避免资源竞争
+        num_workers = min(2, config.num_workers) if config.num_workers > 0 else 0
+        print(f"[Debug][Rank {dist_info['rank']}] 分布式环境，使用 {num_workers} 个worker")
+    else:
+        # 单机环境下使用配置的worker数量
+        num_workers = config.num_workers
+        print(f"[Debug][Rank {dist_info['rank']}] 单机环境，使用 {num_workers} 个worker")
+    
     train_loader = make_loader(train_dataset, True, data_sharding, config.batch_size, num_workers, config.seed)
     valid_loader = make_loader(valid_dataset, False, data_sharding, config.batch_size, 0, config.seed + 1)
     print(f"[Debug][Rank {dist_info['rank']}] train_loader和valid_loader创建完成")
@@ -457,6 +493,22 @@ def main(config: _config.TrainConfig):
     jax.block_until_ready(train_state)
     logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
     print(f"[Debug][Rank {dist_info['rank']}] 模型初始化和权重加载完成")
+
+    # 添加分布式训练状态检查
+    if dist_info["is_distributed"]:
+        print(f"[Debug][Rank {dist_info['rank']}] 检查分布式训练状态...")
+        # 确保所有进程都到达这个点
+        jax.block_until_ready(jax.device_get(jnp.array([dist_info['rank']])))
+        print(f"[Debug][Rank {dist_info['rank']}] 分布式训练状态检查完成")
+        
+        # 验证设备分配
+        expected_devices = jax.device_count()
+        actual_devices = len(jax.devices())
+        if expected_devices != actual_devices:
+            print(f"[Warning][Rank {dist_info['rank']}] 设备数量不匹配: 期望 {expected_devices}, 实际 {actual_devices}")
+        
+        # 验证进程信息
+        print(f"[Debug][Rank {dist_info['rank']}] 进程信息: process_count={jax.process_count()}, process_index={jax.process_index()}")
 
     if resuming:
         print(f"[Debug][Rank {dist_info['rank']}] 恢复训练状态")

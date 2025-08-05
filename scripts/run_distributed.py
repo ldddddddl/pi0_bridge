@@ -59,26 +59,26 @@ def setup_manual_environment(args):
 def create_slurm_script(args):
     """创建SLURM提交脚本"""
     script_content = f"""#!/bin/bash
-#SBATCH --job-name={args.job_name}
-#SBATCH --nodes={args.num_nodes}
-#SBATCH --ntasks-per-node={args.gpus_per_node}
-#SBATCH --cpus-per-task={args.cpus_per_task}
-#SBATCH --gres=gpu:{args.gpus_per_node}
-#SBATCH --time={args.time_limit}
-#SBATCH --output={args.output_dir}/slurm_%j.out
-#SBATCH --error={args.output_dir}/slurm_%j.err
-#SBATCH --partition={args.partition}
+    #SBATCH --job-name={args.job_name}
+    #SBATCH --nodes={args.num_nodes}
+    #SBATCH --ntasks-per-node={args.gpus_per_node}
+    #SBATCH --cpus-per-task={args.cpus_per_task}
+    #SBATCH --gres=gpu:{args.gpus_per_node}
+    #SBATCH --time={args.time_limit}
+    #SBATCH --output={args.output_dir}/slurm_%j.out
+    #SBATCH --error={args.output_dir}/slurm_%j.err
+    #SBATCH --partition={args.partition}
 
-# 设置环境变量
-export MASTER_PORT=29500
-export MASTER_ADDR=$SLURM_LAUNCH_NODE_IPADDR
+    # 设置环境变量
+    export MASTER_PORT=29500
+    export MASTER_ADDR=$SLURM_LAUNCH_NODE_IPADDR
 
-# 激活conda环境（如果需要）
-# source activate your_env_name
+    # 激活conda环境（如果需要）
+    # source activate your_env_name
 
-# 运行训练脚本
-srun python {args.script_path} {args.script_args}
-"""
+    # 运行训练脚本
+    srun python {args.script_path} {args.script_args}
+    """
     
     script_path = Path(args.output_dir) / "run_slurm.sh"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,10 +94,31 @@ srun python {args.script_path} {args.script_args}
     print(f"sbatch {script_path}")
 
 
+def run_training_directly(script_args):
+    """直接运行训练，而不是通过subprocess"""
+    print(f"直接运行训练，参数: {script_args}")
+    
+    # 导入训练模块
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    
+    # 导入训练相关模块
+    from scripts import train
+    import openpi.training.config as _config
+    
+    # 设置命令行参数
+    sys.argv = ["train.py"] + script_args
+    
+    # 获取配置并运行
+    config = _config.cli()
+    train.main(config)
+
+
 def main():
     parser = argparse.ArgumentParser(description="多机多卡训练启动脚本")
     parser.add_argument("--mode", choices=["slurm", "manual", "create_slurm"], 
                        default="manual", help="运行模式")
+    parser.add_argument("--direct", action="store_true", 
+                       help="直接运行训练，不使用subprocess")
     
     # SLURM脚本创建参数
     parser.add_argument("--job-name", default="distributed_training", help="作业名称")
@@ -112,10 +133,10 @@ def main():
     
     # 手动启动参数
     parser.add_argument("--rank", type=int, default=0, help="当前进程的rank")
-    parser.add_argument("--world-size", type=int, default=1, help="总进程数")
+    parser.add_argument("--world-size", type=int, default=8, help="总进程数")
     parser.add_argument("--local-rank", type=int, default=0, help="本地rank")
     parser.add_argument("--node-rank", type=int, default=0, help="节点rank")
-    parser.add_argument("--master-addr", default="localhost", help="主节点地址")
+    parser.add_argument("--master-addr", default="10.1.0.6", help="主节点地址")
     parser.add_argument("--master-port", type=int, default=29500, help="主节点端口")
     
     args = parser.parse_args()
@@ -158,22 +179,26 @@ def main():
             "--overwrite",
             "--data.repo-id", "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
         ]
-    print(f"script_args: {script_args}")
-    # 构建完整的命令
-    cmd = [sys.executable, "scripts/train.py"] + script_args
     
-    print(f"执行命令: {' '.join(cmd)}")
-    
-    # 运行训练脚本
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"训练脚本执行失败: {e}")
-        sys.exit(1)
-    except KeyboardInterrupt:
-        print("训练被用户中断")
-        sys.exit(0)
+    if args.direct:
+        # 直接运行训练
+        run_training_directly(script_args)
+    else:
+        # 通过subprocess运行
+        cmd = [sys.executable, "scripts/train.py"] + script_args
+        
+        print(f"执行命令: {' '.join(cmd)}")
+        
+        # 运行训练脚本
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"训练脚本执行失败: {e}")
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("训练被用户中断")
+            sys.exit(0)
 
 
 if __name__ == "__main__":
-    main() 
+    main()
