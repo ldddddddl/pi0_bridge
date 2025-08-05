@@ -6,7 +6,7 @@
 import os
 import jax
 import jax.numpy as jnp
-from scripts.train import init_distributed_environment
+from train import init_distributed_environment
 
 def test_jax_distributed():
     """测试JAX分布式环境"""

@@ -409,7 +409,7 @@ class TrainConfig:
     batch_size: int = 32
     # 用于数据加载器的工作进程数。增加这个数字将加快数据加载速度，
     # 但会增加内存和 CPU 使用率。
-    num_workers: int = 2
+    num_workers: int = 0
     # 要运行的训练步骤（批次）数
     num_train_steps: int = 30_000
 
@@ -435,7 +435,7 @@ class TrainConfig:
     # 但训练可能会变慢。
     # 例如，如果总设备数为 4，fsdp 设备数为 2；那么模型将被分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
-    fsdp_devices: int = 4
+    fsdp_devices: int = 8
 
     # 末端位置维度
     end_pos_dim: int = 7
