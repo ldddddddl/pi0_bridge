@@ -26,6 +26,7 @@ import pandas as pd
 from einops import rearrange
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
+import matplotlib.pyplot as plt
 from PIL import Image
 from scipy.spatial.transform import Rotation as R
 import torch
@@ -66,37 +67,39 @@ is_use_delta_pose = True
 
 def read_episode_data(data_dir, episode_index):
     """
-    读取pai0_microwave格式中的episode数据
+    使用LeRobot官方方法读取pai0_microwave格式中的episode数据
     Args:
         data_dir: 数据集根目录
         episode_index: episode索引
     Returns:
-        dict: 包含parquet数据和任务信息
+        dict: 包含hf_dataset切片和任务信息
     """
-    # 读取parquet文件
-    parquet_path = os.path.join(data_dir, "data", "chunk-000", f"episode_{episode_index:06d}.parquet")
-    if not os.path.exists(parquet_path):
-        raise ValueError(f"Parquet file not found: {parquet_path}")
-    
-    df = pd.read_parquet(parquet_path)
-    
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
     # 读取任务信息
+    import json
     tasks_path = os.path.join(data_dir, "meta", "tasks.jsonl")
     tasks_dict = {}
     with open(tasks_path, 'r') as f:
         for line in f:
             task_data = json.loads(line.strip())
             tasks_dict[task_data["task_index"]] = task_data["task"]
-    
+    # 用LeRobotDataset读取
+    lero_dataset = LeRobotDataset(
+        repo_id="pai0_microwave",  # 可自定义
+        root=data_dir,
+        episodes=[episode_index],
+    )
+    hf_dataset = lero_dataset.load_hf_dataset()
+    # 取出当前episode的所有数据
+    ep_data = hf_dataset.filter(lambda x: x["episode_index"] == episode_index)
     # 获取该episode的任务
-    task_index = df["task_index"].iloc[0]
+    task_index = ep_data["task_index"][0]
     task_name = tasks_dict.get(task_index, "unknown_task")
-    
     return {
-        "dataframe": df,
+        "dataframe": ep_data,
         "task_name": task_name,
         "task_index": task_index,
-        "episode_length": len(df)
+        "episode_length": len(ep_data)
     }
 
 def extract_frame_from_video(video_path, frame_index):
@@ -231,34 +234,29 @@ def convert_state_to_gripper_format(state_data):
         "combined_state": combined_position.astype(np.float32)
     }
 
-def convert_state_to_delta_format(current_state, next_state):
+def convert_state_to_delta_pose(current_state, next_state):
     """
-    将pai0_microwave的state数据转换为delta格式
+    按照convert_pose_to_delta_pose的规则处理pai0_microwave 14维state/action
     Args:
-        current_state: numpy array, 当前14维状态数据
-        next_state: numpy array, 下一个14维状态数据
+        current_state: numpy array, shape (14,)
+        next_state: numpy array, shape (14,)
     Returns:
-        dict: 包含delta信息
+        numpy array, shape (14,)
     """
-    # 计算delta
-    delta_state = next_state - current_state
-    
-    # 对于角度，处理跨越边界的情况（-180到180度）
-    for i in [3, 4, 5, 10, 11, 12]:  # 角度维度
-        if delta_state[i] > 180:
-            delta_state[i] -= 360
-        elif delta_state[i] < -180:
-            delta_state[i] += 360
-    
-    # 提取左右臂的delta信息
-    left_delta = delta_state[:7]
-    right_delta = delta_state[7:]
-    
-    return {
-        "left_delta": left_delta.astype(np.float32),
-        "right_delta": right_delta.astype(np.float32),
-        "combined_delta": delta_state.astype(np.float32)
-    }
+    # 关节极限（假设与DOBOT_CR5_JOINTS一致，左臂+右臂）
+    # [x, y, z, rx, ry, rz, gripper] * 2
+    JOINT_LIMITS = np.array([360, 360, 160, 360, 360, 360, 100, 360, 360, 160, 360, 360, 360, 100])
+    delta = next_state - current_state
+    for i in range(14):
+        # 只对前6维和后6维做极限修正，gripper不做
+        if i % 7 < 6:
+            if delta[i] > 300 or delta[i] < -300:
+                abs_delta = JOINT_LIMITS[i] - abs(delta[i])
+                if current_state[i] >= 0:
+                    delta[i] = abs_delta
+                else:
+                    delta[i] = -abs_delta
+    return delta.astype(np.float32)
 
 
 def downsample_nn(img, out_h=224, out_w=224):
@@ -367,55 +365,103 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
                 continue
 
             # 处理数据
-            episode_length = len(df)
-            max_frames = (episode_length - 1) // horizon  # 减1是因为最后一步没有action
-            
-            print(f"Episode {episode_index}: {episode_length} frames, creating {max_frames} samples with horizon={horizon}")
-
-            for frame_idx in range(max_frames):
-                # 计算当前frame对应的索引
-                data_idx = frame_idx * horizon
-
-                # 从视频中提取帧（使用overhead_cam作为top_image和wrist_image）
-                top_rgb = extract_frame_from_video(video_path, data_idx)
-                wrist_rgb = extract_frame_from_video(video_path, data_idx)  # 暂时使用同一个视频源
-
-                # 收集当前horizon范围内的所有state和action
-                states = []
-                actions = []
-                
-                for step in range(horizon):
-                    current_idx = data_idx + step
-                    next_idx = current_idx + 1
-                    
-                    if next_idx >= episode_length:
-                        break
-                        
-                    # 获取状态数据
-                    current_state = np.array(df.iloc[current_idx]["observation.state"])
-                    next_action = np.array(df.iloc[next_idx]["action"])
-                    
-                    states.append(current_state.astype(np.float32))
-                    actions.append(next_action.astype(np.float32))
-
-                if len(states) < horizon:
-                    continue  # 跳过不完整的序列
-
-                # 将states和actions展平为一维数组
-                states_flat = np.concatenate(states)
-                actions_flat = np.concatenate(actions)
-                
-                # 添加帧到数据集
-                dataset.add_frame(
-                    {
+            ep_data = df  # 现在df是datasets.Dataset
+            episode_length = len(ep_data)
+            state_delta_list = []
+            action_delta_list = []
+            if horizon == 1:
+                for i in range(1, episode_length):
+                    prev_state = ep_data["observation.state"][i-1]
+                    curr_state = ep_data["observation.state"][i]
+                    prev_action = ep_data["action"][i-1]
+                    curr_action = ep_data["action"][i]
+                    # 计算delta
+                    state_delta = convert_state_to_delta_pose(np.array(prev_state), np.array(curr_state))
+                    action_delta = convert_state_to_delta_pose(np.array(prev_action), np.array(curr_action))
+                    state_delta_list.append(state_delta)
+                    action_delta_list.append(action_delta)
+                    # 取图像
+                    top_rgb = extract_frame_from_video(video_path, i)
+                    wrist_rgb = extract_frame_from_video(video_path, i)
+                    # 存储
+                    dataset.add_frame({
+                        "top_image": top_rgb,
+                        "wrist_image": wrist_rgb,
+                        "state": state_delta,
+                        "lang_goal": task_name,
+                        "action": action_delta,
+                        "task": task_name,
+                    })
+                    print(f"Added frame {i}")
+            else:
+                for frame_idx in range((episode_length - 1) // horizon):
+                    data_idx = frame_idx * horizon
+                    top_rgb = extract_frame_from_video(video_path, data_idx)
+                    wrist_rgb = extract_frame_from_video(video_path, data_idx)
+                    states = []
+                    actions = []
+                    for step in range(horizon):
+                        current_idx = data_idx + step
+                        next_idx = current_idx + 1
+                        if next_idx >= episode_length:
+                            break
+                        current_state = ep_data["observation.state"][current_idx]
+                        next_action = ep_data["action"][next_idx]
+                        states.append(np.array(current_state, dtype=np.float32))
+                        actions.append(np.array(next_action, dtype=np.float32))
+                    if len(states) < horizon:
+                        continue
+                    states = np.array(states)
+                    actions = np.array(actions)
+                    states_delta = np.zeros_like(states)
+                    actions_delta = np.zeros_like(actions)
+                    if len(states) > 1:
+                        for i in range(1, len(states)):
+                            states_delta[i] = convert_state_to_delta_pose(states[i-1], states[i])
+                            actions_delta[i] = convert_state_to_delta_pose(actions[i-1], actions[i])
+                    # 第0帧delta默认就是0
+                    state_delta_list.extend(states_delta)
+                    action_delta_list.extend(actions_delta)
+                    states_flat = states_delta.flatten()
+                    actions_flat = actions_delta.flatten()
+                    dataset.add_frame({
                         "top_image": top_rgb,
                         "wrist_image": wrist_rgb,
                         "state": states_flat,
                         "lang_goal": task_name,
                         "action": actions_flat,
                         "task": task_name,
-                    }
-                )
+                    })
+                    
+            # episode结束后画图
+            if len(state_delta_list) > 0:
+                state_delta_arr = np.stack(state_delta_list, axis=0)
+                plt.figure(figsize=(16, 8))
+                for i in range(14):
+                    plt.plot(state_delta_arr[:, i], label=f'state_dim_{i}')
+                plt.title(f'Episode {episode_index} State Delta')
+                plt.xlabel('Frame')
+                plt.ylabel('Delta Value')
+                plt.legend()
+                plt.savefig(f'state_delta_plot_ep{episode_index}.png')
+                plt.close()
+            if len(action_delta_list) > 0:
+                action_delta_arr = np.stack(action_delta_list, axis=0)
+                plt.figure(figsize=(16, 8))
+                for i in range(14):
+                    plt.plot(action_delta_arr[:, i], label=f'action_dim_{i}')
+                plt.title(f'Episode {episode_index} Action Delta')
+                plt.xlabel('Frame')
+                plt.ylabel('Delta Value')
+                plt.legend()
+                plt.savefig(f'action_delta_plot_ep{episode_index}.png')
+                plt.close()
+
+            # plt.imsave("top_rgb.png", top_rgb.transpose(1, 2, 0))
+            # plt.imsave("wrist_rgb.png", wrist_rgb.transpose(1, 2, 0))
+            # plt.show()
+            
+
 
             dataset.save_episode()
             
