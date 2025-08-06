@@ -6,10 +6,10 @@
 #     ./launch_hetero_multi_node.sh 10.1.0.12 29500 1 2,3,4,5,6,7,8,9 12 4
 
 # ====== 你可以在这里写默认参数 ======
-DEFAULT_MASTER_ADDR="10.1.0.6"
+DEFAULT_MASTER_ADDR="10.10.1.16"
 DEFAULT_MASTER_PORT=29500
 DEFAULT_NODE_RANK=0
-DEFAULT_GPU_IDS="0,1,2,3"
+DEFAULT_GPU_IDS="0,1,2,7"
 DEFAULT_WORLD_SIZE=8
 DEFAULT_RANK_START=0
 # ===================================
@@ -53,6 +53,7 @@ for i in "${!GPU_ID_ARR[@]}"; do
         --master-addr $MASTER_ADDR \
         --master-port $MASTER_PORT &
     pids[$RANK]=$!
+    sleep 5
 done
 
 echo "所有进程已启动，等待完成..."

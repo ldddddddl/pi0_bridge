@@ -133,10 +133,10 @@ def main():
     
     # 手动启动参数
     parser.add_argument("--rank", type=int, default=0, help="当前进程的rank")
-    parser.add_argument("--world-size", type=int, default=8, help="总进程数")
+    parser.add_argument("--world-size", type=int, default=4, help="总进程数")
     parser.add_argument("--local-rank", type=int, default=0, help="本地rank")
     parser.add_argument("--node-rank", type=int, default=0, help="节点rank")
-    parser.add_argument("--master-addr", default="10.1.0.6", help="主节点地址")
+    parser.add_argument("--master-addr", default="10.10.1.16", help="主节点地址")
     parser.add_argument("--master-port", type=int, default=29500, help="主节点端口")
     
     args = parser.parse_args()
@@ -177,7 +177,6 @@ def main():
             "pi0_bridge_traj",
             "--exp-name", "pi0_bridge_traj",
             "--overwrite",
-            "--data.repo-id", "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
         ]
     
     if args.direct:

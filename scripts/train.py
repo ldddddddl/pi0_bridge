@@ -101,8 +101,10 @@ def init_distributed_environment():
             
             # 添加超时机制和重试逻辑
             import time
-            max_retries = 3
-            retry_delay = 5
+            max_retries = 10  # 增加重试次数
+            retry_delay = 10  # 增加重试间隔
+            
+            print(f"[Rank {rank}] 开始JAX分布式初始化，等待所有 {world_size} 个进程...")
             
             for attempt in range(max_retries):
                 try:
@@ -113,19 +115,27 @@ def init_distributed_environment():
                         process_id=rank,
                         local_device_ids=[local_rank]
                     )
-                    print(f"JAX分布式初始化成功: rank={rank}/{world_size}, process_count={jax.process_count()}, process_index={jax.process_index()}")
+                    print(f"[Rank {rank}] JAX分布式初始化成功: rank={rank}/{world_size}, process_count={jax.process_count()}, process_index={jax.process_index()}")
                     break
                 except Exception as e:
                     if attempt < max_retries - 1:
-                        print(f"JAX分布式初始化失败 (尝试 {attempt + 1}/{max_retries}): {e}")
-                        print(f"等待 {retry_delay} 秒后重试...")
+                        print(f"[Rank {rank}] JAX分布式初始化失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                        print(f"[Rank {rank}] 等待 {retry_delay} 秒后重试...")
                         time.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 1.5, 60)  # 指数退避，最大60秒
                     else:
-                        print(f"JAX分布式初始化最终失败: {e}")
+                        print(f"[Rank {rank}] JAX分布式初始化最终失败: {e}")
+                        print(f"[Rank {rank}] 当前环境变量:")
+                        print(f"  MASTER_ADDR: {os.environ.get('MASTER_ADDR', 'localhost')}")
+                        print(f"  MASTER_PORT: {os.environ.get('MASTER_PORT', '29500')}")
+                        print(f"  WORLD_SIZE: {world_size}")
+                        print(f"  RANK: {rank}")
+                        print(f"  LOCAL_RANK: {local_rank}")
+                        print(f"  NODE_RANK: {node_rank}")
                         raise
                         
         except Exception as e:
-            print(f"JAX分布式初始化失败: {e}")
+            print(f"[Rank {rank}] JAX分布式初始化失败: {e}")
             raise
     
     return {
@@ -480,7 +490,7 @@ def main(config: _config.TrainConfig):
     logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
 
     # Log images from first batch to sanity check (only on main process)
-    if dist_info["rank"] == 0:
+    if dist_info["rank"] == 0 and config.wandb_enabled:
         images_to_log = [
             wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
             for i in range(min(5, len(next(iter(batch[0].images.values())))))
@@ -588,8 +598,6 @@ if __name__ == "__main__":
         "--exp-name",
         "pi0_bridge_traj",
         "--overwrite",
-        "--data.repo-id",
-        "/home/ubuntu/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
     ]
 
     main(_config.cli())
