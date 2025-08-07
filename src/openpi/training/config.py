@@ -412,7 +412,7 @@ class TrainConfig:
     num_workers: int = 0
     # 要运行的训练步骤（批次）数
     num_train_steps: int = 30_000
-
+    distributed: bool = False
     # 记录训练指标的频率（以步骤为单位）
     log_interval: int = 200
     # 保存检查点的频率（以步骤为单位）
@@ -435,7 +435,7 @@ class TrainConfig:
     # 但训练可能会变慢。
     # 例如，如果总设备数为 4，fsdp 设备数为 2；那么模型将被分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
-    fsdp_devices: int = 8
+    fsdp_devices: int = 1
 
     # 末端位置维度
     end_pos_dim: int = 7

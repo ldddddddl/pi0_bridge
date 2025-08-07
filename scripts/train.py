@@ -2,8 +2,8 @@ import dataclasses
 import datetime
 import functools
 import logging
-import platform
 import os
+import platform
 import sys
 from typing import Any
 
@@ -44,10 +44,10 @@ class Subset:
         return len(self.indices)
 
 
-def init_distributed_environment():
+def init_distributed_environment(distributed: bool=False):
     """初始化分布式训练环境"""
     # 设置分布式训练环境变量
-    if "SLURM_PROCID" in os.environ:
+    if "SLURM_PROCID" in os.environ and distributed:
         # SLURM环境
         rank = int(os.environ["SLURM_PROCID"])
         world_size = int(os.environ["SLURM_NTASKS"])
@@ -65,7 +65,7 @@ def init_distributed_environment():
         if "MASTER_ADDR" not in os.environ:
             os.environ["MASTER_ADDR"] = os.environ.get("SLURM_LAUNCH_NODE_IPADDR", "localhost")
             
-    elif "RANK" in os.environ:
+    elif "RANK" in os.environ and distributed:
         # 手动设置的环境变量
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
@@ -388,7 +388,7 @@ def main(config: _config.TrainConfig):
     print("[Debug] 进入 main() 函数")
     # 初始化分布式环境
     print("[Debug] 开始分布式环境初始化")
-    dist_info = init_distributed_environment()
+    dist_info = init_distributed_environment(config.distributed)
     print(f"[Debug] 分布式环境初始化完成: rank={dist_info['rank']}, world_size={dist_info['world_size']}, local_rank={dist_info['local_rank']}, node_rank={dist_info['node_rank']}, is_distributed={dist_info['is_distributed']}")
     init_logging(dist_info)
     
@@ -589,7 +589,7 @@ if __name__ == "__main__":
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [

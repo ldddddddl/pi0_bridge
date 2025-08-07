@@ -177,6 +177,7 @@ def main():
             "pi0_bridge_traj",
             "--exp-name", "pi0_bridge_traj",
             "--overwrite",
+            "--distributed",
         ]
     
     if args.direct:
