@@ -412,7 +412,7 @@ class TrainConfig:
     num_workers: int = 0
     # 要运行的训练步骤（批次）数
     num_train_steps: int = 30_000
-    distributed: bool = False
+    distributed: bool = True
     # 记录训练指标的频率（以步骤为单位）
     log_interval: int = 200
     # 保存检查点的频率（以步骤为单位）

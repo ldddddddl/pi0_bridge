@@ -5,12 +5,27 @@
 # 例: ./launch_hetero_multi_node.sh
 #     ./launch_hetero_multi_node.sh 10.1.0.12 29500 1 2,3,4,5,6,7,8,9 12 4
 
+# 手动设置
+# export MASTER_ADDR=10.10.1.175
+# export MASTER_PORT=29500
+# export WORLD_SIZE=8
+# export NODE_RANK=1
+
+# 清空 29500 端口
+: "
+for pid in $(lsof -ti:29500); do
+    echo "正在终止进程: $pid"
+    kill -9 $pid
+done
+"
+# /etc/hosts 如果通信不上, 在 /etc/hosts 中添加 ip username
+
 # ====== 你可以在这里写默认参数 ======
-DEFAULT_MASTER_ADDR="10.10.1.16"
+DEFAULT_MASTER_ADDR="10.10.1.175"
 DEFAULT_MASTER_PORT=29500
 DEFAULT_NODE_RANK=0
-DEFAULT_GPU_IDS="0,1,2,6"
-DEFAULT_WORLD_SIZE=8
+DEFAULT_GPU_IDS="0,1,2,3,4,5,6,7"
+DEFAULT_WORLD_SIZE=16
 DEFAULT_RANK_START=0
 # ===================================
 
@@ -53,7 +68,7 @@ for i in "${!GPU_ID_ARR[@]}"; do
         --master-addr $MASTER_ADDR \
         --master-port $MASTER_PORT &
     pids[$RANK]=$!
-    sleep 5
+    sleep 3
 done
 
 echo "所有进程已启动，等待完成..."

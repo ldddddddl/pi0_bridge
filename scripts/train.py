@@ -69,7 +69,7 @@ def init_distributed_environment(distributed: bool=False):
         # 手动设置的环境变量
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
-        local_rank = int(os.environ.get("LOCAL_RANK", rank))
+        local_rank = [int(os.environ.get("LOCAL_RANK", rank))]
         node_rank = int(os.environ.get("NODE_RANK", 0))
         
         # 设置JAX分布式环境变量
@@ -85,7 +85,7 @@ def init_distributed_environment(distributed: bool=False):
         # 单机训练
         rank = 0
         world_size = 1
-        local_rank = 0
+        local_rank = [int(id) for id in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
         node_rank = 0
     
     # 设置CUDA设备
@@ -113,7 +113,7 @@ def init_distributed_environment(distributed: bool=False):
                         coordinator_address=f"{os.environ.get('MASTER_ADDR', 'localhost')}:{os.environ.get('MASTER_PORT', '29500')}",
                         num_processes=world_size,
                         process_id=rank,
-                        local_device_ids=[local_rank]
+                        local_device_ids=local_rank
                     )
                     print(f"[Rank {rank}] JAX分布式初始化成功: rank={rank}/{world_size}, process_count={jax.process_count()}, process_index={jax.process_index()}")
                     break
@@ -589,7 +589,7 @@ if __name__ == "__main__":
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
