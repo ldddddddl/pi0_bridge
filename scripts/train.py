@@ -85,12 +85,12 @@ def init_distributed_environment(distributed: bool=False):
         # 单机训练
         rank = 0
         world_size = 1
-        local_rank = [int(id) for id in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
+        local_rank = [int(id) for id in os.environ.get('CUDA_VISIBLE_DEVICES', '0').split(',')]
         node_rank = 0
     
     # 设置CUDA设备
     if "CUDA_VISIBLE_DEVICES" not in os.environ:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank[0] if isinstance(local_rank, list) else local_rank)
     
     # 如果是分布式训练，初始化JAX分布式环境
     if world_size > 1:
@@ -113,7 +113,7 @@ def init_distributed_environment(distributed: bool=False):
                         coordinator_address=f"{os.environ.get('MASTER_ADDR', 'localhost')}:{os.environ.get('MASTER_PORT', '29500')}",
                         num_processes=world_size,
                         process_id=rank,
-                        local_device_ids=local_rank
+                        local_device_ids=local_rank if isinstance(local_rank, list) else [local_rank]
                     )
                     print(f"[Rank {rank}] JAX分布式初始化成功: rank={rank}/{world_size}, process_count={jax.process_count()}, process_index={jax.process_index()}")
                     break
@@ -145,6 +145,53 @@ def init_distributed_environment(distributed: bool=False):
         "node_rank": node_rank,
         "is_distributed": world_size > 1
     }
+
+
+def validate_distributed_config(dist_info, config):
+    """验证分布式训练配置的正确性"""
+    if not dist_info["is_distributed"]:
+        return
+    
+    # 验证批次大小
+    if config.batch_size % jax.device_count() != 0:
+        raise ValueError(
+            f"Batch size {config.batch_size} must be divisible by the number of devices {jax.device_count()}."
+        )
+    
+    # 验证设备数量
+    expected_devices = jax.device_count()
+    actual_devices = len(jax.devices())
+    if expected_devices != actual_devices:
+        print(f"[Warning][Rank {dist_info['rank']}] 设备数量不匹配: 期望 {expected_devices}, 实际 {actual_devices}")
+    
+    # 验证进程信息
+    if jax.process_count() != dist_info["world_size"]:
+        raise ValueError(f"进程数量不匹配: 期望 {dist_info['world_size']}, 实际 {jax.process_count()}")
+    
+    if jax.process_index() != dist_info["rank"]:
+        raise ValueError(f"进程索引不匹配: 期望 {dist_info['rank']}, 实际 {jax.process_index()}")
+    
+    print(f"[Debug][Rank {dist_info['rank']}] 分布式配置验证通过")
+
+
+def sync_distributed_state(train_state, info, dist_info, step, log_interval):
+    """分布式训练状态同步函数"""
+    if not dist_info["is_distributed"]:
+        return train_state, info
+    
+    # 同步模型状态
+    jax.block_until_ready(train_state)
+    
+    # 同步训练指标（用于日志记录）
+    if step % log_interval == 0:
+        # 使用pmean同步训练指标
+        sync_info = jax.tree.map(
+            lambda x: jax.lax.pmean(x, axis_name='batch') if isinstance(x, jnp.ndarray) else x,
+            info
+        )
+        info = sync_info
+    
+    return train_state, info
 
 
 def init_logging(dist_info):
@@ -397,10 +444,8 @@ def main(config: _config.TrainConfig):
     logging.info(f"JAX device_count: {jax.device_count()}, local_device_count: {jax.local_device_count()}")
 
     print(f"[Debug][Rank {dist_info['rank']}] 开始数据加载配置")
-    if config.batch_size % jax.device_count() != 0:
-        raise ValueError(
-            f"Batch size {config.batch_size} must be divisible by the number of devices {jax.device_count()}."
-        )
+    validate_distributed_config(dist_info, config)
+    print(f"[Debug][Rank {dist_info['rank']}] 数据加载配置验证完成")
 
     jax.config.update("jax_compilation_cache_dir", str(epath.Path("~/.cache/jax").expanduser()))
 
@@ -454,9 +499,16 @@ def main(config: _config.TrainConfig):
     def make_loader(dataset, shuffle, sharding, batch_size, num_workers, seed):
         # 先transform
         dataset = _data_loader.transform_dataset(dataset, full_data_config)
+        
+        # 计算每个进程的本地批次大小
+        if dist_info["is_distributed"]:
+            local_batch_size = batch_size // jax.process_count()
+        else:
+            local_batch_size = batch_size
+        
         torch_loader = _data_loader.TorchDataLoader(
             dataset,
-            local_batch_size=batch_size // jax.process_count(),
+            local_batch_size=local_batch_size,
             sharding=sharding,
             shuffle=shuffle,
             num_workers=num_workers,
@@ -485,6 +537,14 @@ def main(config: _config.TrainConfig):
     print(f"[Debug][Rank {dist_info['rank']}] 开始获取第一个batch")
     batch = next(train_data_iter)
     print(f"[Debug][Rank {dist_info['rank']}] 第一个batch获取完成")
+    
+    # 分布式训练数据同步点：确保所有进程都准备好开始训练
+    if dist_info["is_distributed"]:
+        print(f"[Debug][Rank {dist_info['rank']}] 等待所有进程准备就绪...")
+        # 使用简单的同步操作确保所有进程都到达训练开始点
+        sync_token = jnp.array([dist_info['rank']], dtype=jnp.int32)
+        jax.block_until_ready(sync_token)
+        print(f"[Debug][Rank {dist_info['rank']}] 所有进程准备就绪，开始训练")
 
     logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
     logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
@@ -499,33 +559,33 @@ def main(config: _config.TrainConfig):
 
     print(f"[Debug][Rank {dist_info['rank']}] 开始模型初始化和权重加载")
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
-    print(f"[Debug][Rank {dist_info['rank']}] 模型初始化完成，等待进程就绪")
-    jax.block_until_ready(train_state)
+    print(f"[Debug][Rank {dist_info['rank']}] 模型初始化完成")
+    
+    # 分布式训练模型同步点：确保所有进程的模型初始化完成
+    if dist_info["is_distributed"]:
+        print(f"[Debug][Rank {dist_info['rank']}] 同步模型状态...")
+        jax.block_until_ready(train_state)
+        print(f"[Debug][Rank {dist_info['rank']}] 模型状态同步完成")
+    
     logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
     print(f"[Debug][Rank {dist_info['rank']}] 模型初始化和权重加载完成")
 
-    # 添加分布式训练状态检查
+    # 只在分布式环境下进行必要的同步检查
     if dist_info["is_distributed"]:
-        print(f"[Debug][Rank {dist_info['rank']}] 检查分布式训练状态...")
-        # 确保所有进程都到达这个点
-        jax.block_until_ready(jax.device_get(jnp.array([dist_info['rank']])))
-        print(f"[Debug][Rank {dist_info['rank']}] 分布式训练状态检查完成")
+        # 验证进程信息（轻量级检查，不阻塞）
+        print(f"[Debug][Rank {dist_info['rank']}] 进程信息: process_count={jax.process_count()}, process_index={jax.process_index()}")
         
-        # 验证设备分配
+        # 验证设备分配（轻量级检查）
         expected_devices = jax.device_count()
         actual_devices = len(jax.devices())
         if expected_devices != actual_devices:
             print(f"[Warning][Rank {dist_info['rank']}] 设备数量不匹配: 期望 {expected_devices}, 实际 {actual_devices}")
-        
-        # 验证进程信息
-        print(f"[Debug][Rank {dist_info['rank']}] 进程信息: process_count={jax.process_count()}, process_index={jax.process_index()}")
 
     if resuming:
         print(f"[Debug][Rank {dist_info['rank']}] 恢复训练状态")
         train_state = _checkpoints.restore_state(checkpoint_manager, train_state, train_loader)
         print(f"[Debug][Rank {dist_info['rank']}] 训练状态恢复完成")
 
-    print(f"[Debug][Rank {dist_info['rank']}] 开始训练主循环")
     ptrain_step = jax.jit(
         functools.partial(train_step, config),
         in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
@@ -541,12 +601,18 @@ def main(config: _config.TrainConfig):
         dynamic_ncols=True,
         disable=dist_info["rank"] != 0,  # 只在主进程显示进度条
     )
-
+    print(f"[Debug][Rank {dist_info['rank']}] 开始训练主循环")
     infos = []
     for step in pbar:
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
+        
+        # 分布式训练同步点：确保所有进程完成当前步骤
+        train_state, info = sync_distributed_state(train_state, info, dist_info, step, config.log_interval)
+            
         infos.append(info)
+        
+        # 日志记录（只在主进程）
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
@@ -555,7 +621,8 @@ def main(config: _config.TrainConfig):
                 pbar.write(f"Step {step}: {info_str}")
                 wandb.log(reduced_info, step=step)
             infos = []
-        # 每valid_interval步进行一次验证
+        
+        # 验证（只在主进程）
         if step % valid_interval == 0 and valid_len > 0:
             try:
                 valid_batch = next(valid_data_iter)
@@ -567,13 +634,16 @@ def main(config: _config.TrainConfig):
             if dist_info["rank"] == 0:  # 只在主进程打印验证日志
                 pbar.write(f"Step {step}: valid_loss={valid_info['valid_total_loss']:.4f}")
                 wandb.log(valid_info, step=step)
+        
+        # 数据加载（所有进程都需要）
         try:
             batch = next(train_data_iter)
         except StopIteration:
             train_data_iter = iter(train_loader)
             batch = next(train_data_iter)
+        
+        # 检查点保存（只在主进程）
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            # 只在主进程保存检查点
             if dist_info["rank"] == 0:
                 _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
 

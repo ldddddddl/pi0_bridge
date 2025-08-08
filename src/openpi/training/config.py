@@ -435,7 +435,7 @@ class TrainConfig:
     # 但训练可能会变慢。
     # 例如，如果总设备数为 4，fsdp 设备数为 2；那么模型将被分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
-    fsdp_devices: int = 1
+    fsdp_devices: int = 8
 
     # 末端位置维度
     end_pos_dim: int = 7

@@ -53,6 +53,18 @@ export MASTER_PORT
 export WORLD_SIZE
 export NODE_RANK
 
+# 检查端口是否被占用
+if lsof -Pi :$MASTER_PORT -sTCP:LISTEN -t >/dev/null ; then
+    echo "警告: 端口 $MASTER_PORT 已被占用，可能会导致连接问题"
+    echo "建议先清理端口: lsof -ti:$MASTER_PORT | xargs kill -9"
+fi
+
+# 创建日志目录
+LOG_DIR="./logs/$(date +%Y%m%d_%H%M%S)"
+mkdir -p $LOG_DIR
+
+# 存储进程ID的数组
+declare -a pids
 
 for i in "${!GPU_ID_ARR[@]}"; do
     export CUDA_VISIBLE_DEVICES=${GPU_ID_ARR[$i]}
@@ -68,7 +80,10 @@ for i in "${!GPU_ID_ARR[@]}"; do
         --master-addr $MASTER_ADDR \
         --master-port $MASTER_PORT &
     pids[$RANK]=$!
-    sleep 3
+    echo "进程 $RANK 已启动，PID: ${pids[$RANK]}, 日志: $LOG_FILE"
+    
+    # 等待一小段时间再启动下一个进程，避免同时启动导致的资源竞争
+    sleep 2
 done
 
 echo "所有进程已启动，等待完成..."
