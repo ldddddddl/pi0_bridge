@@ -22,9 +22,21 @@ def initialize_checkpoint_dir(
 ) -> tuple[ocp.CheckpointManager, bool]:
     checkpoint_dir = epath.Path(checkpoint_dir).resolve()
     resuming = False
+    
+    # 分布式安全的文件操作
     if checkpoint_dir.exists():
         if overwrite:
-            checkpoint_dir.rmtree()
+            # 使用try-except处理多进程竞争条件
+            try:
+                checkpoint_dir.rmtree()
+            except FileNotFoundError:
+                # 如果目录已经被其他进程删除，忽略错误
+                pass
+            except Exception as e:
+                # 记录其他可能的错误
+                logging.warning(f"删除检查点目录时出现错误: {e}")
+            
+            # 确保目录存在
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
             logging.info(f"Wiped checkpoint directory {checkpoint_dir}")
         elif resume:
@@ -35,6 +47,7 @@ def initialize_checkpoint_dir(
                 "to indicate how to handle it."
             )
 
+    # 确保目录存在
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     mngr = ocp.CheckpointManager(

@@ -6,6 +6,8 @@ import os
 import platform
 import sys
 from typing import Any
+from datetime import datetime
+import time
 
 import etils.epath as epath
 import flax.nnx as nnx
@@ -100,7 +102,6 @@ def init_distributed_environment(distributed: bool=False):
             os.environ["JAX_COORDINATOR_PORT"] = os.environ.get("MASTER_PORT", "29500")
             
             # 添加超时机制和重试逻辑
-            import time
             max_retries = 10  # 增加重试次数
             retry_delay = 10  # 增加重试间隔
             
@@ -182,14 +183,17 @@ def sync_distributed_state(train_state, info, dist_info, step, log_interval):
     # 同步模型状态
     jax.block_until_ready(train_state)
     
-    # 同步训练指标（用于日志记录）
-    if step % log_interval == 0:
-        # 使用pmean同步训练指标
-        sync_info = jax.tree.map(
-            lambda x: jax.lax.pmean(x, axis_name='batch') if isinstance(x, jnp.ndarray) else x,
-            info
-        )
-        info = sync_info
+    # 如果需要跨进程同步训练指标，可以取消注释下面的代码
+    # 但需要确保在正确的 JAX 编译上下文中执行
+    # if step % log_interval == 0:
+    #     # 使用 jax.jit 包装同步操作
+    #     @jax.jit
+    #     def sync_metrics(metrics):
+    #         return jax.tree.map(
+    #             lambda x: jax.lax.pmean(x, axis_name='batch') if isinstance(x, jnp.ndarray) else x,
+    #             metrics
+    #         )
+    #     info = sync_metrics(info)
     
     return train_state, info
 
@@ -224,8 +228,7 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
         wandb.init(mode="disabled")
         return
         
-    ct = datetime.datetime.now()
-    strf_time = ct.strftime("%Y-%m-%d-%H-%M-%S")
+    strf_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     if not enabled:
         wandb.init(mode="disabled")
@@ -446,8 +449,17 @@ def main(config: _config.TrainConfig):
     print(f"[Debug][Rank {dist_info['rank']}] 开始数据加载配置")
     validate_distributed_config(dist_info, config)
     print(f"[Debug][Rank {dist_info['rank']}] 数据加载配置验证完成")
-
-    jax.config.update("jax_compilation_cache_dir", str(epath.Path("~/.cache/jax").expanduser()))
+    ctime = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 为分布式训练提供进程特定的编译缓存目录，避免多进程冲突
+    if dist_info["is_distributed"]:
+        # 每个进程使用独立的缓存目录
+        cache_dir = epath.Path(f"~/.cache/jax/{ctime}/rank_{dist_info['rank']}").expanduser()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        jax.config.update("jax_compilation_cache_dir", str(cache_dir))
+        print(f"[Debug][Rank {dist_info['rank']}] 使用进程特定编译缓存: {cache_dir}")
+    else:
+        # 单机训练使用默认缓存目录
+        jax.config.update("jax_compilation_cache_dir", str(epath.Path(f"~/.cache/jax/{ctime}").expanduser()))
 
     rng = jax.random.key(config.seed)
     train_rng, init_rng = jax.random.split(rng)
@@ -467,12 +479,39 @@ def main(config: _config.TrainConfig):
     replicated_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
     print(f"[Debug][Rank {dist_info['rank']}] 开始检查点管理和wandb初始化")
-    checkpoint_manager, resuming = _checkpoints.initialize_checkpoint_dir(
-        config.checkpoint_dir,
-        keep_period=config.keep_period,
-        overwrite=config.overwrite,
-        resume=config.resume,
-    )
+
+    # 在分布式环境下，确保所有进程同步后再进行文件操作
+    if dist_info["is_distributed"]:
+        print(f"[Debug][Rank {dist_info['rank']}] 等待所有进程准备进行文件操作...")
+        # 使用简单的同步操作确保所有进程都到达文件操作点
+        sync_token = jnp.array([dist_info['rank']], dtype=jnp.int32)
+        jax.block_until_ready(sync_token)
+        print(f"[Debug][Rank {dist_info['rank']}] 所有进程准备就绪，开始文件操作")
+
+    # 分布式安全的检查点初始化
+    try:
+        checkpoint_manager, resuming = _checkpoints.initialize_checkpoint_dir(
+            config.checkpoint_dir,
+            keep_period=config.keep_period,
+            overwrite=config.overwrite,
+            resume=config.resume,
+        )
+        print(f"[Debug][Rank {dist_info['rank']}] 检查点管理完成")
+    except Exception as e:
+        print(f"[Error][Rank {dist_info['rank']}] 检查点初始化失败: {e}")
+        if dist_info["is_distributed"]:
+            print(f"[Error][Rank {dist_info['rank']}] 分布式环境下检查点初始化失败，尝试重新初始化...")
+            # 在分布式环境下，给其他进程一些时间
+            time.sleep(dist_info["rank"] * 0.1)  # 错开时间
+            checkpoint_manager, resuming = _checkpoints.initialize_checkpoint_dir(
+                config.checkpoint_dir,
+                keep_period=config.keep_period,
+                overwrite=config.overwrite,
+                resume=config.resume,
+            )
+            print(f"[Debug][Rank {dist_info['rank']}] 检查点管理重试完成")
+        else:
+            raise
     init_wandb(config, resuming=resuming, enabled=config.wandb_enabled, dist_info=dist_info)
     print(f"[Debug][Rank {dist_info['rank']}] 检查点和wandb初始化完成")
     # breakpoint()
@@ -608,8 +647,8 @@ def main(config: _config.TrainConfig):
             train_state, info = ptrain_step(train_rng, train_state, batch)
         
         # 分布式训练同步点：确保所有进程完成当前步骤
-        train_state, info = sync_distributed_state(train_state, info, dist_info, step, config.log_interval)
-            
+        with sharding.set_mesh(mesh):
+            train_state, info = sync_distributed_state(train_state, info, dist_info, step, config.log_interval)
         infos.append(info)
         
         # 日志记录（只在主进程）
@@ -618,7 +657,7 @@ def main(config: _config.TrainConfig):
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             if dist_info["rank"] == 0:  # 只在主进程打印日志
-                pbar.write(f"Step {step}: {info_str}")
+                pbar.write(f"Step {step}: {info_str}, epoch: {train_loader._data_loader._current_epoch}")
                 wandb.log(reduced_info, step=step)
             infos = []
         

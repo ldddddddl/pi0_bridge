@@ -382,6 +382,7 @@ class TorchDataLoader:
 
         self._sharding = sharding
         self._num_batches = num_batches
+        self._current_epoch = 0
 
         mp_context = None
         if num_workers > 0:
@@ -408,10 +409,9 @@ class TorchDataLoader:
 
     def __iter__(self):
         num_items = 0
-        epoch = 0
         while True:
-            epoch += 1
-            print(f"current epoch: {epoch}")
+            self._current_epoch += 1
+            print(f"current epoch: {self._current_epoch}")
             data_iter = iter(self._data_loader)
             while True:
                 if self._num_batches is not None and num_items >= self._num_batches:
