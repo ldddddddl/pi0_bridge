@@ -48,6 +48,8 @@ class Subset:
 
 def init_distributed_environment(distributed: bool=False):
     """初始化分布式训练环境"""
+    # os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
+    # os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
     # 设置分布式训练环境变量
     if "SLURM_PROCID" in os.environ and distributed:
         # SLURM环境
@@ -542,8 +544,12 @@ def main(config: _config.TrainConfig):
         # 计算每个进程的本地批次大小
         if dist_info["is_distributed"]:
             local_batch_size = batch_size // jax.process_count()
+            # 为每个进程设置不同的随机种子，确保数据分割的一致性
+            process_seed = seed + dist_info["rank"]
+            print(f"[Debug][Rank {dist_info['rank']}] 分布式数据加载器: local_batch_size={local_batch_size}, process_seed={process_seed}")
         else:
             local_batch_size = batch_size
+            process_seed = seed
         
         torch_loader = _data_loader.TorchDataLoader(
             dataset,
@@ -551,7 +557,7 @@ def main(config: _config.TrainConfig):
             sharding=sharding,
             shuffle=shuffle,
             num_workers=num_workers,
-            seed=seed,
+            seed=process_seed,
         )
         # DataLoaderImpl包装，返回(Observation, Actions)
         return _data_loader.DataLoaderImpl(full_data_config, torch_loader)
@@ -642,6 +648,7 @@ def main(config: _config.TrainConfig):
     )
     print(f"[Debug][Rank {dist_info['rank']}] 开始训练主循环")
     infos = []
+    start_time = time.time()
     for step in pbar:
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
@@ -656,8 +663,9 @@ def main(config: _config.TrainConfig):
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
+            current_epoch = (step * config.batch_size) // len(train_dataset)
             if dist_info["rank"] == 0:  # 只在主进程打印日志
-                pbar.write(f"Step {step}: {info_str}, epoch: {train_loader._data_loader._current_epoch}")
+                pbar.write(f"Step {step}: {info_str}, epoch: {current_epoch}, time: {time.time() - start_time:.2f}s")
                 wandb.log(reduced_info, step=step)
             infos = []
         
@@ -697,6 +705,8 @@ if __name__ == "__main__":
 
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
+    # os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
     # 设置使用的GPU设备
     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 

@@ -414,7 +414,7 @@ class TrainConfig:
     num_train_steps: int = 30_000
     distributed: bool = True
     # 记录训练指标的频率（以步骤为单位）
-    log_interval: int = 200
+    log_interval: int = 1
     # 保存检查点的频率（以步骤为单位）
     save_interval: int = 10000
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。

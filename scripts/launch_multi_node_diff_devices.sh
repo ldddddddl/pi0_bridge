@@ -18,6 +18,7 @@ for pid in $(lsof -ti:29500); do
     kill -9 $pid
 done
 "
+
 # /etc/hosts 如果通信不上, 在 /etc/hosts 中添加 ip username
 
 # ====== 你可以在这里写默认参数 ======

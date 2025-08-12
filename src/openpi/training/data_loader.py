@@ -410,7 +410,6 @@ class TorchDataLoader:
     def __iter__(self):
         num_items = 0
         while True:
-            self._current_epoch += 1
             print(f"current epoch: {self._current_epoch}")
             data_iter = iter(self._data_loader)
             while True:
@@ -422,6 +421,7 @@ class TorchDataLoader:
                     break  # We've exhausted the dataset. Create a new iterator and start over.
                 num_items += 1
                 yield jax.tree.map(lambda x: jax.make_array_from_process_local_data(self._sharding, x), batch)
+            self._current_epoch += 1
 
 
 def _collate_fn(items):
