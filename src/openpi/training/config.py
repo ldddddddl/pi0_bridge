@@ -611,14 +611,14 @@ _CONFIGS = [
         model=pi0.Pi0Config(action_dim=32, end_pos_dim=7, action_horizon=25, max_token_len=180, output_format = "traj"),
 
         data=LeRobotLiberoDataConfig(
-            repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
+            repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pai0_microwave",
             # repo_id='/datasets/converted_dataset/202507013',
             base_config=DataConfig(
                 # 此标志决定是否从 LeRobot 数据集的 `task` 字段加载提示（即任务说明）。  # noqa: RUF003
                 # 如果设置为 True，提示将在输入字典中显示为 `prompt` 字段。建议设置为 True。
                 prompt_from_task=True,
-                root=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
-                repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/dataset0729",
+                root=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pai0_microwave",
+                repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pai0_microwave",
             ),
         ),
         output_format = "traj",

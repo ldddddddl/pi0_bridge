@@ -15,32 +15,30 @@ pandas, opencv-python, lerobot等
 转换后的数据集将被保存到 $LEROBOT_HOME 目录下。
 """
 
+import json
 import os
 from pathlib import Path
-import json
-import re
 import shutil
-import cv2
-import pandas as pd
 
+import cv2
 from einops import rearrange
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image
 from scipy.spatial.transform import Rotation as R
 import torch
 import tyro
+import tqdm
 
 # from openpi.bridgevla.libs.point_renderer_main.point_renderer. \
 #     rvt_renderer import RVTBoxRenderer as BoxRenderer
-from openpi.bridgevla.mvt import config as mvt_config
 
 # from openpi.bridgevla.utils.rvt_utils import move_pc_in_bound
 # from openpi.bridgevla.mvt.utils import place_pc_in_cube
 
-os.environ["http_proxy"] = "http://localhost:10808"
-os.environ["https_proxy"] = "http://localhost:10808"
+# os.environ["http_proxy"] = "http://localhost:10808"
+# os.environ["https_proxy"] = "http://localhost:10808"
 
 
 # 使用用户主目录下的路径
@@ -74,12 +72,13 @@ def read_episode_data(data_dir, episode_index):
     Returns:
         dict: 包含hf_dataset切片和任务信息
     """
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
     # 读取任务信息
     import json
+
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
     tasks_path = os.path.join(data_dir, "meta", "tasks.jsonl")
     tasks_dict = {}
-    with open(tasks_path, 'r') as f:
+    with open(tasks_path) as f:
         for line in f:
             task_data = json.loads(line.strip())
             tasks_dict[task_data["task_index"]] = task_data["task"]
@@ -113,18 +112,18 @@ def extract_frame_from_video(video_path, frame_index):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Cannot open video: {video_path}")
-    
+
     # 设置帧位置
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
     ret, frame = cap.read()
     cap.release()
-    
+
     if not ret:
         raise ValueError(f"Cannot read frame {frame_index} from {video_path}")
-    
+
     # OpenCV读取的是BGR格式，转换为RGB
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    
+
     # 转换为连续数组
     img = np.ascontiguousarray(img)
     # 确保数据类型是uint8
@@ -211,22 +210,22 @@ def convert_state_to_gripper_format(state_data):
     left_position = state_data[:3] / 1000.0  # mm -> m
     left_orientation = state_data[3:6]  # 欧拉角
     left_gripper = state_data[6]
-    
-    # 提取右臂数据 (后7维)  
+
+    # 提取右臂数据 (后7维)
     right_position = state_data[7:10] / 1000.0  # mm -> m
     right_orientation = state_data[10:13]  # 欧拉角
     right_gripper = state_data[13]
-    
+
     # 转换为四元数
     left_quat = R.from_euler("xyz", left_orientation, degrees=True).as_quat()
     right_quat = R.from_euler("xyz", right_orientation, degrees=True).as_quat()
-    
+
     # 合并为单一格式（使用左臂作为主臂，右臂信息也保留）
     combined_position = np.concatenate([left_position, left_quat, [left_gripper/100.0]])
-    
+
     return {
         "left_position": left_position,
-        "left_orientation": left_quat,  
+        "left_orientation": left_quat,
         "left_gripper": left_gripper/100.0,
         "right_position": right_position,
         "right_orientation": right_quat,
@@ -256,6 +255,14 @@ def convert_state_to_delta_pose(current_state, next_state):
                     delta[i] = abs_delta
                 else:
                     delta[i] = -abs_delta
+        else:
+            # claw state 100:open 0:close
+            if delta[i] > 25:
+                delta[i] = 1.
+            elif delta[i] < -25:
+                delta[i] = -1.
+            else:
+                delta[i] = 0
     return delta.astype(np.float32)
 
 
@@ -292,7 +299,7 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
     image_size = 256
     image_channel = 3
     dataset_name = data_dir.split("/")[-1]
-    
+
     # 清理输出目录中已存在的数据集
     output_path = os.path.join(OUTPUT_PATH, REPO_NAME if REPO_NAME is not None else dataset_name)
     if os.path.exists(output_path):
@@ -313,7 +320,7 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
                 "names": ["channel", "height", "width"],
             },
             "wrist_image": {
-                "dtype": "image", 
+                "dtype": "image",
                 "shape": (image_channel, image_size, image_size),
                 "names": ["channel", "height", "width"],
             },
@@ -341,7 +348,7 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
     # 读取episode信息
     episodes_path = os.path.join(data_dir, "meta", "episodes.jsonl")
     episodes_info = []
-    with open(episodes_path, 'r') as f:
+    with open(episodes_path) as f:
         for line in f:
             episodes_info.append(json.loads(line.strip()))
 
@@ -356,8 +363,8 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
             # 读取episode数据
             episode_data = read_episode_data(data_dir, episode_index)
             df = episode_data["dataframe"]
-            task_name = episode_data["task_name"]
-            
+            task_name = episode_info["tasks"][0]
+
             # 获取视频路径
             video_path = os.path.join(data_dir, "videos", "chunk-000", "observation.images.overhead_cam", f"episode_{episode_index:06d}.mp4")
             if not os.path.exists(video_path):
@@ -369,12 +376,14 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
             episode_length = len(ep_data)
             state_delta_list = []
             action_delta_list = []
+            action_list = []
             if horizon == 1:
-                for i in range(1, episode_length):
+                for i in tqdm.tqdm(range(1, episode_length)):
                     prev_state = ep_data["observation.state"][i-1]
                     curr_state = ep_data["observation.state"][i]
                     prev_action = ep_data["action"][i-1]
                     curr_action = ep_data["action"][i]
+                    action_list.append(np.array(curr_action, dtype=np.float32))
                     # 计算delta
                     state_delta = convert_state_to_delta_pose(np.array(prev_state), np.array(curr_state))
                     action_delta = convert_state_to_delta_pose(np.array(prev_action), np.array(curr_action))
@@ -392,9 +401,8 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
                         "action": action_delta,
                         "task": task_name,
                     })
-                    print(f"Added frame {i}")
             else:
-                for frame_idx in range((episode_length - 1) // horizon):
+                for frame_idx in tqdm.tqdm(range((episode_length - 1) // horizon)):
                     data_idx = frame_idx * horizon
                     top_rgb = extract_frame_from_video(video_path, data_idx)
                     wrist_rgb = extract_frame_from_video(video_path, data_idx)
@@ -433,35 +441,45 @@ def main(data_dir: str, device: str, horizon: int = 1, *, push_to_hub: bool = Fa
                         "task": task_name,
                     })
                     
+            colors = plt.cm.tab20(np.linspace(0, 1, 14))
             # episode结束后画图
-            if len(state_delta_list) > 0:
-                state_delta_arr = np.stack(state_delta_list, axis=0)
-                plt.figure(figsize=(16, 8))
-                for i in range(14):
-                    plt.plot(state_delta_arr[:, i], label=f'state_dim_{i}')
-                plt.title(f'Episode {episode_index} State Delta')
-                plt.xlabel('Frame')
-                plt.ylabel('Delta Value')
-                plt.legend()
-                plt.savefig(f'state_delta_plot_ep{episode_index}.png')
-                plt.close()
+            # if len(state_delta_list) > 0:
+            #     state_delta_arr = np.stack(state_delta_list, axis=0)
+            #     plt.figure(figsize=(16, 8))
+            #     # 使用不同的颜色映射确保每个维度都有不同颜色
+            #     for i in range(14):
+            #         plt.plot(state_delta_arr[:, i], label=f"state_dim_{i}", color=colors[i])
+            #     plt.title(f"Episode {episode_index} State Delta")
+            #     plt.xlabel("Frame")
+            #     plt.ylabel("Delta Value")
+            #     plt.legend()
+            #     plt.savefig(f"{output_path}/state_delta_plot_ep{episode_index}.png")
+            #     plt.close()
             if len(action_delta_list) > 0:
                 action_delta_arr = np.stack(action_delta_list, axis=0)
                 plt.figure(figsize=(16, 8))
+                # 使用不同的颜色映射确保每个维度都有不同颜色
                 for i in range(14):
-                    plt.plot(action_delta_arr[:, i], label=f'action_dim_{i}')
-                plt.title(f'Episode {episode_index} Action Delta')
-                plt.xlabel('Frame')
-                plt.ylabel('Delta Value')
+                    plt.plot(action_delta_arr[:, i], label=f"action_dim_{i}", color=colors[i])
+                plt.title(f"Episode {episode_index} Action Delta")
+                plt.xlabel("Frame")
+                plt.ylabel("Delta Value")
                 plt.legend()
-                plt.savefig(f'action_delta_plot_ep{episode_index}.png')
+                plt.savefig(f"{output_path}/action_delta_plot_ep{episode_index}.png")
                 plt.close()
-
-            # plt.imsave("top_rgb.png", top_rgb.transpose(1, 2, 0))
-            # plt.imsave("wrist_rgb.png", wrist_rgb.transpose(1, 2, 0))
-            # plt.show()
-            
-
+                
+            if len(action_list) > 0:
+                action_arr = np.stack(action_list, axis=0)
+                plt.figure(figsize=(16, 8))
+                # 使用不同的颜色映射确保每个维度都有不同颜色
+                for i in range(14):
+                    plt.plot(action_arr[:, i], label=f"action_dim_{i}", color=colors[i])
+                plt.title(f"Episode {episode_index} Action")
+                plt.xlabel("Frame")
+                plt.ylabel("Action Value")
+                plt.legend()
+                plt.savefig(f"{output_path}/action_plot_ep{episode_index}.png")
+                plt.close()
 
             dataset.save_episode()
             
