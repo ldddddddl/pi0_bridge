@@ -411,12 +411,12 @@ class TrainConfig:
     # 但会增加内存和 CPU 使用率。
     num_workers: int = 0
     # 要运行的训练步骤（批次）数
-    num_train_steps: int = 30_000
+    num_train_steps: int = 2
     distributed: bool = True
     # 记录训练指标的频率（以步骤为单位）
     log_interval: int = 1
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 10000
+    save_interval: int = 1
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
     keep_period: int | None = 10000
 
@@ -426,7 +426,8 @@ class TrainConfig:
     resume: bool = False
 
     # 如果为 true，将启用 wandb 日志记录
-    wandb_enabled: bool = False
+    wandb_enabled: bool = False 
+    
 
     # 用于传递元数据到策略服务器
     policy_metadata: dict[str, Any] | None = None
@@ -442,7 +443,7 @@ class TrainConfig:
     # 输出格式
     output_format: str = "traj"
     # 验证集比例
-    valid_data_size: float = 0.0
+    valid_data_size: float = 0.1
     # 验证间隔
     valid_interval: int = 100
     # inference device id
@@ -608,7 +609,7 @@ _CONFIGS = [
         # 更改名称以反映您的模型和数据集。
         name="pi0_bridge_traj",
 
-        model=pi0.Pi0Config(action_dim=32, end_pos_dim=7, action_horizon=25, max_token_len=180, output_format = "traj"),
+        model=pi0.Pi0Config(action_dim=32, end_pos_dim=7, action_horizon=25, max_token_len=250, output_format = "traj"),
 
         data=LeRobotLiberoDataConfig(
             repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pai0_microwave",

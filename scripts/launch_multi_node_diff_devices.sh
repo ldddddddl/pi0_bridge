@@ -5,12 +5,13 @@
 # 例: ./launch_hetero_multi_node.sh
 #     ./launch_hetero_multi_node.sh 10.1.0.12 29500 1 2,3,4,5,6,7,8,9 12 4
 
+: "
 手动设置
-# export MASTER_ADDR=10.10.1.175
-# export MASTER_PORT=29500
-# export WORLD_SIZE=2
-# export NODE_RANK=0
-
+export MASTER_ADDR=10.10.1.175
+export MASTER_PORT=29500
+export WORLD_SIZE=2
+export NODE_RANK=0
+"
 # 清空 29500 端口
 : "
 for pid in $(lsof -ti:29500); do

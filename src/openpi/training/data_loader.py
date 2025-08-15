@@ -410,7 +410,7 @@ class TorchDataLoader:
     def __iter__(self):
         num_items = 0
         while True:
-            print(f"current epoch: {self._current_epoch}")
+            # print(f"current epoch: {self._current_epoch}")
             data_iter = iter(self._data_loader)
             while True:
                 if self._num_batches is not None and num_items >= self._num_batches:

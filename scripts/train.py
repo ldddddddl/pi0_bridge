@@ -33,6 +33,9 @@ import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
 
 
+os.environ["http_proxy"] = "http://10.0.2.72:8082"
+os.environ["https_proxy"] = "http://10.0.2.72:8082"
+
 # 顶层定义Subset类，便于PyTorch DataLoader多进程pickle
 class Subset:
     def __init__(self, dataset, indices):
@@ -199,6 +202,38 @@ def sync_distributed_state(train_state, info, dist_info, step, log_interval):
     
     return train_state, info
 
+
+def sync_checkpoint_save(checkpoint_manager, train_state, train_loader, step, dist_info, mesh):
+    """分布式检查点保存同步函数"""
+    if not dist_info["is_distributed"]:
+        # 非分布式训练，直接保存
+        _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
+        return
+    
+    # 确保所有进程完成当前步骤的训练
+    jax.block_until_ready(train_state)
+    
+    # 第一次同步：确保所有进程都到达检查点保存点
+    @jax.jit
+    def pre_save_sync():
+        sync_token = jnp.array(1.0)
+        return jax.lax.all_gather(sync_token, axis_name='batch')
+    
+    with sharding.set_mesh(mesh):
+        pre_save_sync()
+    
+    # 只在主进程保存检查点
+    if dist_info["rank"] == 0:
+        _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
+    
+    # 第二次同步：确保所有进程等待保存完成
+    @jax.jit
+    def post_save_sync():
+        sync_token = jnp.array(1.0)
+        return jax.lax.all_gather(sync_token, axis_name='batch')
+    
+    with sharding.set_mesh(mesh):
+        post_save_sync()
 
 def init_logging(dist_info):
     """Custom logging format for better readability."""
@@ -594,13 +629,13 @@ def main(config: _config.TrainConfig):
     logging.info(f"Train/Valid split: train={train_len}, valid={valid_len}")
     logging.info(f"Initialized train loader:\n{training_utils.array_tree_to_info(batch)}")
 
-    # Log images from first batch to sanity check (only on main process)
-    if dist_info["rank"] == 0 and config.wandb_enabled:
-        images_to_log = [
-            wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
-            for i in range(min(5, len(next(iter(batch[0].images.values())))))
-        ]
-        wandb.log({"camera_views": images_to_log}, step=0)
+    # # Log images from first batch to sanity check (only on main process)
+    # if dist_info["rank"] == 0 and config.wandb_enabled:
+    #     images_to_log = [
+    #         wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
+    #         for i in range(min(5, len(next(iter(batch[0].images.values())))))
+    #     ]
+    #     wandb.log({"camera_views": images_to_log}, step=0)
 
     print(f"[Debug][Rank {dist_info['rank']}] 开始模型初始化和权重加载")
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
@@ -689,10 +724,9 @@ def main(config: _config.TrainConfig):
             train_data_iter = iter(train_loader)
             batch = next(train_data_iter)
         
-        # 检查点保存（只在主进程）
+        # 检查点保存（使用专门的同步函数）
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            if dist_info["rank"] == 0:
-                _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
+            sync_checkpoint_save(checkpoint_manager, train_state, train_loader, step, dist_info, mesh)
 
     logging.info("Waiting for checkpoint manager to finish")
     if dist_info["rank"] == 0:
