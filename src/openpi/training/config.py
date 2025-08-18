@@ -401,7 +401,7 @@ class TrainConfig:
     # 配置资源的基础目录（例如，标准化统计数据）
     assets_base_dir: str = "./assets"
     # 检查点的基础目录
-    checkpoint_base_dir: str = "./checkpoints"
+    checkpoint_base_dir: str = "/DATA/disk1/checkpoints"
 
     # 训练期间用于随机生成器的随机种子
     seed: int = 42
@@ -409,16 +409,16 @@ class TrainConfig:
     batch_size: int = 32
     # 用于数据加载器的工作进程数。增加这个数字将加快数据加载速度，
     # 但会增加内存和 CPU 使用率。
-    num_workers: int = 0
+    num_workers: int = 8
     # 要运行的训练步骤（批次）数
-    num_train_steps: int = 2
+    num_train_steps: int = 700_000
     distributed: bool = True
     # 记录训练指标的频率（以步骤为单位）
-    log_interval: int = 1
+    log_interval: int = 1000
     # 保存检查点的频率（以步骤为单位）
-    save_interval: int = 1
+    save_interval: int = 20000
     # 如果设置，匹配 step % keep_period == 0 的现有检查点将不会被删除。
-    keep_period: int | None = 10000
+    keep_period: int | None = 20000
 
     # 如果为 true，如果检查点目录存在，它将被覆盖。
     overwrite: bool = True
@@ -426,7 +426,7 @@ class TrainConfig:
     resume: bool = False
 
     # 如果为 true，将启用 wandb 日志记录
-    wandb_enabled: bool = False 
+    wandb_enabled: bool = True 
     
 
     # 用于传递元数据到策略服务器
@@ -436,7 +436,7 @@ class TrainConfig:
     # 但训练可能会变慢。
     # 例如，如果总设备数为 4，fsdp 设备数为 2；那么模型将被分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
-    fsdp_devices: int = 1
+    fsdp_devices: int = 8
 
     # 末端位置维度
     end_pos_dim: int = 7
@@ -445,7 +445,7 @@ class TrainConfig:
     # 验证集比例
     valid_data_size: float = 0.1
     # 验证间隔
-    valid_interval: int = 100
+    valid_interval: int = 1000
     # inference device id
     device: str = "3"
 

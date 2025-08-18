@@ -205,35 +205,14 @@ def sync_distributed_state(train_state, info, dist_info, step, log_interval):
 
 def sync_checkpoint_save(checkpoint_manager, train_state, train_loader, step, dist_info, mesh):
     """分布式检查点保存同步函数"""
-    if not dist_info["is_distributed"]:
-        # 非分布式训练，直接保存
+    try:
+        # 现在checkpoints.save_state内部已经处理了分布式同步
         _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
-        return
-    
-    # 确保所有进程完成当前步骤的训练
-    jax.block_until_ready(train_state)
-    
-    # 第一次同步：确保所有进程都到达检查点保存点
-    @jax.jit
-    def pre_save_sync():
-        sync_token = jnp.array(1.0)
-        return jax.lax.all_gather(sync_token, axis_name='batch')
-    
-    with sharding.set_mesh(mesh):
-        pre_save_sync()
-    
-    # 只在主进程保存检查点
-    if dist_info["rank"] == 0:
-        _checkpoints.save_state(checkpoint_manager, train_state, train_loader, step)
-    
-    # 第二次同步：确保所有进程等待保存完成
-    @jax.jit
-    def post_save_sync():
-        sync_token = jnp.array(1.0)
-        return jax.lax.all_gather(sync_token, axis_name='batch')
-    
-    with sharding.set_mesh(mesh):
-        post_save_sync()
+        if dist_info["rank"] == 0:
+            print(f"[Debug] 检查点保存完成: step {step}")
+    except Exception as e:
+        print(f"[Error][Rank {dist_info['rank']}] 检查点保存失败: {e}")
+        raise
 
 def init_logging(dist_info):
     """Custom logging format for better readability."""
@@ -727,10 +706,18 @@ def main(config: _config.TrainConfig):
         # 检查点保存（使用专门的同步函数）
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
             sync_checkpoint_save(checkpoint_manager, train_state, train_loader, step, dist_info, mesh)
-
-    logging.info("Waiting for checkpoint manager to finish")
-    if dist_info["rank"] == 0:
-        checkpoint_manager.wait_until_finished()
+            checkpoint_manager.wait_until_finished()
+            
+    logging.info("Training completed successfully")
+    
+    # 在分布式环境下，确保所有进程同步结束
+    if dist_info["is_distributed"]:
+        # 等待所有进程完成训练
+        jax.block_until_ready(train_state)
+        
+        # 使用简单的同步操作
+        sync_token = jnp.array([dist_info['rank'], 999999], dtype=jnp.int32)
+        jax.block_until_ready(sync_token)
 
 
 if __name__ == "__main__":

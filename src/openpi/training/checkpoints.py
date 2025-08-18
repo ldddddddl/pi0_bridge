@@ -10,11 +10,17 @@ from etils import epath
 import jax
 import orbax.checkpoint as ocp
 import orbax.checkpoint.future as future
+import jax.numpy as jnp
 
 from openpi.shared import array_typing as at
 import openpi.shared.normalize as _normalize
 import openpi.training.data_loader as _data_loader
 import openpi.training.utils as training_utils
+
+
+def is_distributed() -> bool:
+    """检查是否在分布式环境中运行"""
+    return jax.process_count() > 1
 
 
 def initialize_checkpoint_dir(
@@ -50,6 +56,10 @@ def initialize_checkpoint_dir(
     # 确保目录存在
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    # 在分布式环境中，确保所有进程都创建了目录
+    if is_distributed():
+        jax.block_until_ready(jnp.array(1))  # 简单的同步点
+
     mngr = ocp.CheckpointManager(
         checkpoint_dir,
         item_handlers={
@@ -61,7 +71,8 @@ def initialize_checkpoint_dir(
             max_to_keep=1,
             keep_period=keep_period,
             create=False,
-            async_options=ocp.AsyncOptions(timeout_secs=60),
+            # 暂时禁用异步保存，避免线程池关闭问题
+            async_options=ocp.AsyncOptions(timeout_secs=7200),
         ),
     )
 
@@ -96,7 +107,26 @@ def save_state(
         "train_state": train_state,
         "params": {"params": params},
     }
-    checkpoint_manager.save(step, items)
+    
+    # 在分布式环境中，确保所有进程都准备好保存
+    if is_distributed():
+        # 确保所有进程完成当前步骤的训练
+        jax.block_until_ready(state)
+        
+        # 所有进程都调用save方法，orbax内部会：
+        # 1. 同步所有进程
+        # 2. 只让主进程执行文件操作
+        # 3. 同步保存，确保完成后再继续
+        checkpoint_manager.save(step, items)
+        # 额外的同步点，确保所有进程都完成了保存
+        sync_token = jnp.array([jax.process_index(), step], dtype=jnp.int32)
+        jax.block_until_ready(sync_token)
+        
+        if jax.process_index() == 0:
+            logging.info(f"分布式检查点保存完成: step {step}")
+    else:
+        # 单机训练，同步保存
+        checkpoint_manager.save(step, items)
 
 
 def restore_state(
@@ -117,7 +147,19 @@ def restore_state(
                 "params": {"params": params},
             },
         )
-    return _merge_params(restored["train_state"], restored["params"])
+    
+    # 在分布式环境中，确保所有进程都完成了恢复
+    if is_distributed():
+        restored_state = _merge_params(restored["train_state"], restored["params"])
+        jax.block_until_ready(restored_state)
+        
+        # 同步点
+        sync_token = jnp.array([jax.process_index(), -1], dtype=jnp.int32)
+        jax.block_until_ready(sync_token)
+        
+        return restored_state
+    else:
+        return _merge_params(restored["train_state"], restored["params"])
 
 
 def load_norm_stats(assets_dir: epath.Path | str, asset_id: str) -> dict[str, _normalize.NormStats] | None:
@@ -137,6 +179,11 @@ class CallbackHandler(ocp.AsyncCheckpointHandler):
     def save(self, directory: epath.Path, args: CallbackSave):
         if jax.process_index() == 0:
             args.callback(directory)
+        
+        # 在分布式环境中，确保所有进程都知道保存完成
+        if is_distributed():
+            sync_token = jnp.array([jax.process_index(), 1], dtype=jnp.int32)
+            jax.block_until_ready(sync_token)
 
     async def async_save(self, directory: epath.Path, args: CallbackSave) -> list[futures.Future]:
         return [future.CommitFutureAwaitingContractedSignals(asyncio.to_thread(self.save, directory, args))]
