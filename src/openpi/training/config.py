@@ -287,7 +287,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         # 一旦您创建了自己的转换，您可以用自己的转换替换下面的转换。
         data_transforms = _transforms.Group(
             inputs=[libero_policy.LiberoInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
-            outputs=[libero_policy.LiberoOutputs()],
+            outputs=[libero_policy.BridgeDualArmOutputs()],
         )
 
         # 另一个数据转换：pi0 模型在增量动作上训练（相对于每个动作块中的第一个状态）。
@@ -609,7 +609,7 @@ _CONFIGS = [
         # 更改名称以反映您的模型和数据集。
         name="pi0_bridge_traj",
 
-        model=pi0.Pi0Config(action_dim=32, end_pos_dim=7, action_horizon=25, max_token_len=250, output_format = "traj"),
+        model=pi0.Pi0Config(action_dim=32, end_pos_dim=14, action_horizon=25, max_token_len=250, output_format = "traj"),
 
         data=LeRobotLiberoDataConfig(
             repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/pai0_microwave",

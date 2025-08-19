@@ -26,6 +26,7 @@ class EnvMode(enum.Enum):
     DROID = "droid"
     LIBERO = "libero"
     BRIDGE = "bridge"
+    BRIDGE_TRAJ = "bridge_traj"
 
 @dataclasses.dataclass
 class Checkpoint:
@@ -85,7 +86,11 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     ),
     EnvMode.BRIDGE: Checkpoint(
         config="pi0_bridge",
-        dir=os.path.join(HOME, "vla/pi0_bridge/checkpoints/pi0_bridge/pi0_bridge/2025-07-25-05-43/9999"),
+        dir=os.path.join(HOME, "vla/pi0_bridge/checkpoints/pi0_dual_arm_checkpoints/pi0_dual_arm_microwave_bs128_100kstep"),
+    ),
+    EnvMode.BRIDGE_TRAJ: Checkpoint(
+        config="pi0_bridge_traj",
+        dir=os.path.join(HOME, "vla/pi0_bridge/checkpoints/pi0_dual_arm_checkpoints/pi0_dual_arm_microwave_bs128_100kstep"),
     ),
 }
 
@@ -139,6 +144,6 @@ if __name__ == "__main__":
     sys.argv = [
         sys.argv[0],  # 脚本名
         "--env",  # 第一个位置参数
-        "BRIDGE",
+        "BRIDGE_TRAJ",
     ]
     main(tyro.cli(Args))

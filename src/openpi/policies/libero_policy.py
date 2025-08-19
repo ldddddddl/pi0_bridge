@@ -129,3 +129,18 @@ class BridgeOutputs(transforms.DataTransformFn):
         # 对于pi0_bridge，我们返回前8个动作（因为模型是8维的）。
         # 对于您自己的数据集，用数据集的动作维度替换`8`。
         return {"actions": np.asarray(data["actions"][:, :7])}
+
+@dataclasses.dataclass(frozen=True)
+class BridgeDualArmOutputs(transforms.DataTransformFn):
+    """
+    此类用于将模型输出转换回数据集特定格式。它仅用于推理。
+
+    对于pi0_bridge_traj，我们返回前14个动作（因为模型是14维的）。
+    """
+
+    def __call__(self, data: dict) -> dict:
+        # 只返回前N个动作——由于我们上面将动作填充到模型动作维度，
+        # 我们现在需要在返回字典中解析出正确数量的动作。
+        # 对于pi0_bridge，我们返回前8个动作（因为模型是8维的）。
+        # 对于您自己的数据集，用数据集的动作维度替换`8`。
+        return {"actions": np.asarray(data["actions"][:, :14])}
