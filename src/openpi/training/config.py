@@ -270,8 +270,8 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
                 _transforms.RepackTransform(
                     {
                         "observation/image": "top_image",
-                        "observation/wrist_image": "wrist_image",
-                        # "observation/right_image": "right_image",
+                        "observation/wrist_image": "wrist_image_left",
+                        "observation/right_image": "wrist_image_right",
                         "observation/state": "state",
                         # "observation/gripper_pose": "gripper_pose",
                         "actions": "action",
@@ -401,15 +401,15 @@ class TrainConfig:
     # 配置资源的基础目录（例如，标准化统计数据）
     assets_base_dir: str = "./assets"
     # 检查点的基础目录
-    checkpoint_base_dir: str = "/DATA/disk1/checkpoints"
+    checkpoint_base_dir: str = "/data/pi0_checkpoints"
 
     # 训练期间用于随机生成器的随机种子
     seed: int = 42
     # 全局批量大小
-    batch_size: int = 32
+    batch_size: int = 1
     # 用于数据加载器的工作进程数。增加这个数字将加快数据加载速度，
     # 但会增加内存和 CPU 使用率。
-    num_workers: int = 8
+    num_workers: int = 1
     # 要运行的训练步骤（批次）数
     num_train_steps: int = 700_000
     distributed: bool = True
@@ -426,7 +426,7 @@ class TrainConfig:
     resume: bool = False
 
     # 如果为 true，将启用 wandb 日志记录
-    wandb_enabled: bool = True 
+    wandb_enabled: bool = False 
     
 
     # 用于传递元数据到策略服务器
@@ -436,10 +436,10 @@ class TrainConfig:
     # 但训练可能会变慢。
     # 例如，如果总设备数为 4，fsdp 设备数为 2；那么模型将被分片到 2 个设备，
     # 并在 2 组设备之间运行数据并行。
-    fsdp_devices: int = 8
+    fsdp_devices: int = 1
 
     # 末端位置维度
-    end_pos_dim: int = 7
+    end_pos_dim: int = 14
     # 输出格式
     output_format: str = "traj"
     # 验证集比例
@@ -624,6 +624,28 @@ _CONFIGS = [
         ),
         output_format = "traj",
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+    ),
+
+    TrainConfig(
+        name="pi0_fast_bridge_traj",
+        # 这是一个加载 pi0-FAST 模型进行完整微调的示例。
+        # 修改 action_dim 和 action_horizon 以匹配您的数据集（action horizon 等于
+        # 所需动作块的长度）。
+        # max_token_len 是模型可以处理的最大（非图像）标记数。
+        # 这包括标记化的提示、身体感知状态和（FAST 标记化的）动作标记。
+        # 选择这个值太小可能会截断序列末尾的标记（代码会发出警告），
+        # 而选择太大会浪费内存（因为我们将每个批次元素填充到 max_token_len）。
+        # 一个好的经验法则是单臂机器人使用约 180，双臂机器人使用约 250。
+        # 通常，我们首先选择一个较小的值，如果在训练期间看到许多警告被发出，
+        # 考虑增加这个值。
+        model=pi0_fast.Pi0FASTConfig(action_dim=14, action_horizon=25, max_token_len=250),
+        data=LeRobotLiberoDataConfig(
+            repo_id=f"{HOME}/vla/pi0_bridge/datasets/converted_dataset/openmicrowave_3camera_dualarm_joint",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        # 注意这里我们加载 pi0-FAST 基础模型检查点。
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=30_000,
     ),
 
     TrainConfig(

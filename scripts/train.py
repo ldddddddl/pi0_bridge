@@ -33,8 +33,8 @@ import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
 
 
-os.environ["http_proxy"] = "http://10.0.2.72:8082"
-os.environ["https_proxy"] = "http://10.0.2.72:8082"
+# os.environ["http_proxy"] = "http://10.0.2.72:8082"
+# os.environ["https_proxy"] = "http://10.0.2.72:8082"
 
 # 顶层定义Subset类，便于PyTorch DataLoader多进程pickle
 class Subset:
@@ -726,17 +726,17 @@ if __name__ == "__main__":
 
     # 在 VSCode 里直接 Run 时，先设置好环境变量
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
-    # os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+    os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
     # 设置使用的GPU设备
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
+    os.environ["CUDA_VISIBLE_DEVICES"] = "2"  # 使用第一张GPU，可以改为"0,1,2"来使用多张卡
 
     # 然后把 sys.argv "伪造" 成你在终端里敲的那条命令
     sys.argv = [
         sys.argv[0],  # 脚本名
-        "pi0_bridge_traj",  # 第一个位置参数
+        "pi0_fast_bridge_traj",  # 第一个位置参数
         "--exp-name",
-        "pi0_bridge_traj",
+        "pi0_fast_bridge_traj",
         "--overwrite",
     ]
 

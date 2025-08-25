@@ -123,6 +123,6 @@ if __name__ == "__main__":
     sys.argv = [
         sys.argv[0],  # 脚本名
         "--config-name",
-        "pi0_bridge_traj",  # 第一个位置参数
+        "pi0_fast_bridge_traj",  # 第一个位置参数
     ]
     tyro.cli(main)
